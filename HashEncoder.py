@@ -1,11 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-
-# [000, 001, 010, 011, 100, 101, 110, 111]
-BOX_OFFSETS = torch.tensor([[[i, j, k] for i in [0, 1] for j in [0, 1] for k in [0, 1]]],
-                           device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+import utils
 
 
 class INGPHashEncoder(nn.Module):
@@ -80,7 +75,7 @@ class INGPHashEncoder(nn.Module):
         # bottom_left_index: (N, 3), BOX_OFFSET: (1, 8, 3)
         # we want to broadcast 8 offsets to each index, hence we expand bottom_left_index to (N, 1, 3)
         # to get the shape of (N, 8, 3)
-        voxel_indices = bottom_left_index.unsqueeze(1) + BOX_OFFSETS
+        voxel_indices = bottom_left_index.unsqueeze(1) + utils.BOX_OFFSETS
         # compute hash indices
         hashed_voxel_indices = self.hashed_indices(voxel_indices)
 
