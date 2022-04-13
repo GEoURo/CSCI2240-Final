@@ -3,7 +3,7 @@ import numpy as np
 import pdb
 import torch
 
-from ray_utils import get_rays, get_ray_directions, get_ndc_rays
+from load_utils import get_rays, get_ray_directions, get_ndc_rays
 
 # [000, 001, 010, 011, 100, 101, 110, 111]
 BOX_OFFSETS = torch.tensor([[[i, j, k] for i in [0, 1] for j in [0, 1] for k in [0, 1]]],
