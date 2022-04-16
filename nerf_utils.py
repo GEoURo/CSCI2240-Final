@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # Ray helpers
 def get_rays(h, w, k, c2w):
