@@ -188,3 +188,57 @@ def generate_fine_samples(ray_batch, z_vals, weights, n_sample, perturb=True, py
     z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
     return pts, view_dir, z_vals
+
+
+if __name__ == "__main__":
+    from load_blender import load_blender_data
+    from parser import config_parser
+
+    parser = config_parser()
+    args = parser.parse_args()
+
+    # load data
+    if args.dataset_type == "blender":
+        images, poses, render_poses, hwf, i_split, bounding_box = load_blender_data(args.datadir, args.half_res,
+                                                                                    args.testskip)
+        print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
+
+        args.bounding_box = bounding_box
+
+        near = 2.
+        far = 6.
+
+        if args.white_bkgd:
+            images = images[..., :3] * images[..., -1:] + (1. - images[..., -1:])
+        else:
+            images = images[..., :3]
+
+    else:
+        print("unsupported dataset type")
+        exit(0)
+
+    i_train, i_val, i_test = i_split
+
+    # Cast intrinsics to right types
+    h, w, focal = hwf
+    h, w = int(h), int(w)
+    hwf = [h, w, focal]
+
+    k = np.array([
+        [focal, 0, 0.5 * w],
+        [0, focal, 0.5 * h],
+        [0, 0, 1]
+    ])
+
+    image_train = images[i_train]
+    poses_train = poses[i_train]
+
+    ray_batch, target_rgb = generate_ray_batch_train(image_train, poses_train, near, far, hwf, k, 1024, 0)
+
+    print("ray_batch shape:", ray_batch.shape)
+    print("target_rgb shape:", target_rgb.shape)
+
+    x, view_dir, z_vals = generate_coarse_samples(ray_batch, 64)
+    print("x shape:", x.shape)
+    print("view_dir shape:", view_dir.shape)
+    print("z_vals shape:", z_vals.shape)
