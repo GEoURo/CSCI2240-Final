@@ -1,3 +1,9 @@
+
+data/
+logs/
+*.npz
+*.png
+
 # MacOS
 *.DS_Store
 

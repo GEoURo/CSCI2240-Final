@@ -13,9 +13,9 @@ from torch.distributions import Categorical
 from tqdm import tqdm, trange
 import pickle
 
-from parser import config_parser
+from argparser import config_parser
 from load_blender import load_blender_data
-
+import parser
 
 np.random.seed(0)
 
@@ -91,3 +91,6 @@ def train():
         f = os.path.join(basedir, expname, 'config.txt')
         with open(f, 'w') as file:
             file.write(open(args.config, 'r').read())
+
+if __name__ == '__main__':
+    train()
