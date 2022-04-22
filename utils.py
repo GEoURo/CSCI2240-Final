@@ -1,7 +1,5 @@
-import json
-import numpy as np
-import pdb
 import torch
+import numpy as np
 
 from load_utils import get_rays, get_ray_directions, get_ndc_rays
 

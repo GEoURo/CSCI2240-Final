@@ -1,1 +1,0 @@
-python .\run_nerf.py --expname "lego" --dataset_type "blender" --datadir .\data\lego\ --half_res --white_bkgd

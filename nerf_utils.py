@@ -4,6 +4,18 @@ import numpy as np
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def img2mse(x, y):
+    return torch.mean((x - y) ** 2)
+
+
+def mse2psnr(x):
+    return -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
+
+
+def to8b(x):
+    return (255 * np.clip(x, 0, 1)).astype(np.uint8)
+
+
 # Ray helpers
 def get_rays(h, w, k, c2w):
     i, j = torch.meshgrid(torch.linspace(0, w - 1, w),
