@@ -45,33 +45,26 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
     return all_ret
 
 
-def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
-           c2w=None, ndc=True,
-           near=0., far=1., c2w_staticcam=None,
-           **kwargs):
-    """Render rays
+def render(ray_batch, ray_shape=None, chunk=1024 * 32, **kwargs):
+    """
+    Render rays
     Args:
-      h: int. Height of image in pixels.
-      w: int. Width of image in pixels.
-      k: array of shape [3, 3]. Intrinsic matrix of the camera
+      ray_batch: array of shape [B, 11]. The flattened composite ray tensor generated with utility functions
+      ray_shape: array of shape [H, W, 3]. This parameter is only passed in during test rendering. It tells
+        the render function to reshape the flattened output tensor to the image shape.
       chunk: int. Maximum number of rays to process simultaneously. Used to
         control maximum memory usage. Does not affect final results.
-      rays: array of shape [2, batch_size, 3]. Ray origin and direction for
-        each example in batch.
-      c2w: array of shape [3, 4]. Camera-to-world transformation matrix.
-      ndc: bool. If True, represent ray origin, direction in NDC coordinates.
-      near: float or array of shape [batch_size]. Nearest distance for a ray.
-      far: float or array of shape [batch_size]. Farthest distance for a ray.
-      c2w_staticcam: array of shape [3, 4]. If not None, use this transformation matrix for
-       camera while using other c2w argument for viewing directions.
     Returns:
       rgb_map: [batch_size, 3]. Predicted RGB values for rays.
       disp_map: [batch_size]. Disparity map. Inverse of depth.
       acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
       extras: dict with everything returned by render_rays().
     """
-    rays_d = ray_batch[..., 3:6]
-    sh = rays_d.shape  # [..., 3]
+    if ray_shape is None:
+        rays_d = ray_batch[..., 3:6]
+        sh = rays_d.shape  # [..., 3]
+    else:
+        sh = ray_shape
 
     # Render and reshape
     all_ret = batchify_rays(ray_batch, chunk, **kwargs)
@@ -107,7 +100,10 @@ def render_path(render_poses, hwf, k, chunk, render_kwargs, gt_imgs=None, save_d
                                             near=render_kwargs["near"],
                                             far=render_kwargs["far"],
                                             ndc=render_kwargs["ndc"])
-        rgb, disp, acc, _ = render(h, w, k, chunk=chunk, c2w=c2w[:3, :4], ray_batch=ray_batch, **render_kwargs)
+
+        ray_d_flatten = ray_batch[..., 3:6]
+        ray_d = ray_d_flatten.reshape(h, w, -1)     # should be [H, W, 3]
+        rgb, disp, acc, _ = render(ray_batch, ray_shape=ray_d.shape, chunk=chunk, **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
         if i == 0:
@@ -255,7 +251,8 @@ def render_rays(ray_batch,
                 lindisp=False,
                 perturb=0.,
                 white_bkgd=False,
-                raw_noise_std=0.):
+                raw_noise_std=0.,
+                **kwargs):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -435,7 +432,7 @@ def train():
                                                          pre_crop_frac=args.precrop_frac)
 
         # Core optimization loop #
-        rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, ray_batch=ray_batch, **render_kwargs_train)
+        rgb, disp, acc, extras = render(ray_batch, chunk=args.chunk, **render_kwargs_train)
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_rgb)
