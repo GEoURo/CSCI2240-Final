@@ -309,49 +309,20 @@ def render_rays(ray_batch,
       z_std: [num_rays]. Standard deviation of distances along ray for each
         sample.
     """
-    N_rays = ray_batch.shape[0]
-    rays_o, rays_d = ray_batch[:, 0:3], ray_batch[:, 3:6]  # [N_rays, 3] each
-    view_dir = ray_batch[:, -3:] if ray_batch.shape[-1] > 8 else None
-    bounds = torch.reshape(ray_batch[..., 6:8], [-1, 1, 2])
-    near, far = bounds[..., 0], bounds[..., 1]  # [-1,1]
-
-    # generate coarse samples
-    t_vals = torch.linspace(0., 1., steps=n_coarse_sample)
-    if not lindisp:
-        z_vals = near * (1. - t_vals) + far * (t_vals)
-    else:
-        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * (t_vals))
-
-    z_vals = z_vals.expand([N_rays, n_coarse_sample])
-
-    if perturb > 0.:
-        # get intervals between samples
-        mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        upper = torch.cat([mids, z_vals[..., -1:]], -1)
-        lower = torch.cat([z_vals[..., :1], mids], -1)
-        # stratified samples in those intervals
-        t_rand = torch.rand(z_vals.shape)
-
-        z_vals = lower + (upper - lower) * t_rand
-
-    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
+    rays_d = ray_batch[:, 3:6]  # [N_rays, 3] each
 
     pts_coarse, view_dir_coarse, z_vals_coarse = generate_coarse_samples(ray_batch, n_coarse_sample,
                                                                          inv_depth=lindisp, perturb=perturb)
 
     # query the coarse network
     raw = network_query_fn(pts_coarse, view_dir_coarse, network_coarse)
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals_coarse, rays_d, raw_noise_std, white_bkgd)
 
     rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
     # generate fine samples
-    z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-    z_samples = sample_pdf(z_vals_mid, weights[..., 1:-1], n_fine_sample, det=(perturb == 0.))
-    z_samples = z_samples.detach()
-
-    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
+    pts, view_dir, z_vals, z_samples = generate_fine_samples(ray_batch, z_vals_coarse, weights, n_fine_sample,
+                                                             perturb=perturb)
 
     # query the fine network
     run_fn = network_coarse if network_fine is None else network_fine

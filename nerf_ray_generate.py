@@ -181,4 +181,4 @@ def generate_fine_samples(ray_batch, z_vals, weights, n_sample, perturb=True, py
 
     z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
-    return pts, view_dir, z_vals
+    return pts, view_dir, z_vals, z_samples
