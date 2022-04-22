@@ -32,7 +32,7 @@ def generate_ray_batch_test(hwf, k, c2w, near, far, ndc=True):
     return torch.cat([rays_o, rays_d, near, far, view_dir], dim=-1)
 
 
-def generate_ray_batch_train(images, poses,
+def generate_ray_batch_train(image, pose,
                              near, far, hwf, k,
                              n_rand,
                              curr_step,
@@ -44,8 +44,8 @@ def generate_ray_batch_train(images, poses,
 
     The function will randomly choose an image and generate rays
 
-    :param images: A list of images to choose from
-    :param poses: A list of camera poses corresponding to each image
+    :param image: A image to generate rays
+    :param pose: The camera's transformation matrix
     :param near: float. The near plane for rendering.
     :param far: float. The far plane for rendering
     :param hwf: tuple. A tuple of (height, width, focal)
@@ -57,14 +57,13 @@ def generate_ray_batch_train(images, poses,
     :param pre_crop_frac: float. Fraction of a image taken for central crops
     :return: [rays_o, rays_d, near, far, view_dir], target_rgb
     """
-    image_index = np.random.choice(images.shape[0])
-    target = images[image_index]
-    target = torch.Tensor(target).to(device)
-    pose = poses[image_index, :3, :4]
+    target = torch.Tensor(image).to(device)
+    pose = pose[:3, :4]
 
     h, w, focal = hwf
 
     rays_o, rays_d = get_rays(h, w, k, torch.Tensor(pose))
+
     if curr_step < pre_crop_iter:
         d_h = int(h // 2 * pre_crop_frac)
         d_w = int(w // 2 * pre_crop_frac)

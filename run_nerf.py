@@ -100,7 +100,10 @@ def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
     rays = torch.cat([rays, view_dir], -1)
 
     # Render and reshape
-    all_ret = batchify_rays(ray_batch, chunk, **kwargs)
+    if c2w is not None:
+        all_ret = batchify_rays(ray_batch, chunk, **kwargs)
+    else:
+        all_ret = batchify_rays(rays, chunk, **kwargs)
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = torch.reshape(all_ret[k], k_sh)
@@ -504,7 +507,7 @@ def train():
         batch_rays = torch.stack([rays_o, rays_d], 0)
         target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
-        ray_batch, target_rgb = generate_ray_batch_train(images[i_train], poses[i_train],
+        ray_batch, target_rgb = generate_ray_batch_train(target, pose,
                                                          near, far, hwf, k, N_rand,
                                                          curr_step=i, ndc=render_kwargs_train["ndc"],
                                                          pre_crop_iter=args.precrop_iters,
