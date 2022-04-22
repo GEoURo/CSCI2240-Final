@@ -70,31 +70,8 @@ def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
       acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
       extras: dict with everything returned by render_rays().
     """
-    if c2w is not None:
-        # special case to render full image
-        rays_o, rays_d = get_rays(h, w, k, c2w)
-    else:
-        # use provided ray batch
-        rays_o, rays_d = rays
-
-    # provide ray directions as input
-    view_dir = rays_d
-
-    view_dir = view_dir / torch.norm(view_dir, dim=-1, keepdim=True)
-    view_dir = torch.reshape(view_dir, [-1, 3]).float()
-
+    rays_d = ray_batch[..., 3:6]
     sh = rays_d.shape  # [..., 3]
-    if ndc:
-        # for forward facing scenes
-        rays_o, rays_d = ndc_rays(h, w, k[0][0], 1., rays_o, rays_d)
-
-    # Create ray batch
-    rays_o = torch.reshape(rays_o, [-1, 3]).float()
-    rays_d = torch.reshape(rays_d, [-1, 3]).float()
-
-    near, far = near * torch.ones_like(rays_d[..., :1]), far * torch.ones_like(rays_d[..., :1])
-    rays = torch.cat([rays_o, rays_d, near, far], -1)
-    rays = torch.cat([rays, view_dir], -1)
 
     # Render and reshape
     all_ret = batchify_rays(ray_batch, chunk, **kwargs)
@@ -451,40 +428,14 @@ def train():
         target = images[img_i]
         target = torch.Tensor(target).to(device)
         pose = poses[img_i, :3, :4]
-
         ray_batch, target_rgb = generate_ray_batch_train(target, pose,
                                                          near, far, hwf, k, N_rand,
                                                          curr_step=i, ndc=render_kwargs_train["ndc"],
                                                          pre_crop_iter=args.precrop_iters,
                                                          pre_crop_frac=args.precrop_frac)
 
-        rays_o, rays_d = get_rays(h, w, k, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
-
-        if i < args.precrop_iters:
-            dH = int(h // 2 * args.precrop_frac)
-            dW = int(w // 2 * args.precrop_frac)
-            coords = torch.stack(
-                torch.meshgrid(
-                    torch.linspace(h // 2 - dH, h // 2 + dH - 1, 2 * dH),
-                    torch.linspace(w // 2 - dW, w // 2 + dW - 1, 2 * dW)
-                ), -1)
-            if i == start:
-                print(
-                    f"[Config] Center cropping of size {2 * dH} x {2 * dW} is enabled until iter {args.precrop_iters}")
-        else:
-            coords = torch.stack(torch.meshgrid(torch.linspace(0, h - 1, h), torch.linspace(0, w - 1, w)),
-                                 -1)  # (H, W, 2)
-
-        coords = torch.reshape(coords, [-1, 2])  # (H * W, 2)
-        select_idx = np.random.choice(coords.shape[0], size=[N_rand], replace=False)  # (N_rand,)
-        select_coords = coords[select_idx].long()  # (N_rand, 2)
-        rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-        rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-        batch_rays = torch.stack([rays_o, rays_d], 0)
-        target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-
         # Core optimization loop #
-        rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, rays=batch_rays, **render_kwargs_train, ray_batch=ray_batch)
+        rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, ray_batch=ray_batch, **render_kwargs_train)
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_rgb)
