@@ -474,8 +474,6 @@ def train():
     # Prepare ray batch tensor if batching random rays
     N_rand = args.N_rand
 
-    poses = torch.Tensor(poses).to(device)
-
     N_iters = 1000 + 1
     print('Begin')
     print('TRAIN views are', i_train)
