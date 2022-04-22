@@ -471,14 +471,14 @@ def train():
             }, path)
             print('Saved checkpoints at', path)
 
-        # if i % args.i_video == 0 and i > 0:
-        #     # Turn on testing mode
-        #     with torch.no_grad():
-        #         rgbs, disps = render_path(render_poses, hwf, k, args.chunk, render_kwargs_test)
-        #     print('Done, saving', rgbs.shape, disps.shape)
-        #     movie_base = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-        #     imageio.mimwrite(movie_base + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-        #     imageio.mimwrite(movie_base + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
+        if i % args.i_video == 0 and i > 0:
+            # Turn on testing mode
+            with torch.no_grad():
+                rgbs, disps = render_path(render_poses, hwf, k, args.chunk, render_kwargs_test)
+            print('Done, saving', rgbs.shape, disps.shape)
+            movie_base = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
+            imageio.mimwrite(movie_base + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
+            imageio.mimwrite(movie_base + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
 
         # if args.use_viewdirs:
         #     render_kwargs_test['c2w_staticcam'] = render_poses[0][:3,:4]
