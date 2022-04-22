@@ -97,10 +97,7 @@ def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
     rays = torch.cat([rays, view_dir], -1)
 
     # Render and reshape
-    if c2w is not None:
-        all_ret = batchify_rays(ray_batch, chunk, **kwargs)
-    else:
-        all_ret = batchify_rays(rays, chunk, **kwargs)
+    all_ret = batchify_rays(ray_batch, chunk, **kwargs)
 
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
@@ -439,7 +436,7 @@ def train():
 
     poses = torch.Tensor(poses).to(device)
 
-    n_iters = 5000 + 1
+    n_iters = 2000 + 1
     print('Begin')
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
@@ -490,12 +487,12 @@ def train():
         rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, rays=batch_rays, **render_kwargs_train, ray_batch=ray_batch)
 
         optimizer.zero_grad()
-        img_loss = img2mse(rgb, target_s)
+        img_loss = img2mse(rgb, target_rgb)
         loss = img_loss
         psnr = mse2psnr(img_loss)
 
         if 'rgb0' in extras:
-            img_loss0 = img2mse(extras['rgb0'], target_s)
+            img_loss0 = img2mse(extras['rgb0'], target_rgb)
             loss = loss + img_loss0
             psnr0 = mse2psnr(img_loss0)
 
