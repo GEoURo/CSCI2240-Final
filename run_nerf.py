@@ -311,6 +311,7 @@ def render_rays(ray_batch,
     """
     rays_d = ray_batch[:, 3:6]  # [N_rays, 3] each
 
+    # generate coarse samples
     pts_coarse, view_dir_coarse, z_vals_coarse = generate_coarse_samples(ray_batch, n_coarse_sample,
                                                                          inv_depth=lindisp, perturb=perturb)
 
@@ -327,7 +328,6 @@ def render_rays(ray_batch,
     # query the fine network
     run_fn = network_coarse if network_fine is None else network_fine
     raw = network_query_fn(pts, view_dir, run_fn)
-
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd)
 
     ret = {
@@ -336,9 +336,10 @@ def render_rays(ray_batch,
         'z_std': torch.std(z_samples, dim=-1, unbiased=False)
     }
 
-    for k in ret:
-        if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
-            print(f"! [Numerical Error] {k} contains nan or inf.")
+    if DEBUG:
+        for k in ret:
+            if torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any():
+                print(f"! [Numerical Error] {k} contains nan or inf.")
 
     return ret
 
@@ -438,7 +439,7 @@ def train():
 
     poses = torch.Tensor(poses).to(device)
 
-    n_iters = 2000 + 1
+    n_iters = 5000 + 1
     print('Begin')
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
