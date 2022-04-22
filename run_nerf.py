@@ -6,9 +6,11 @@ import torch.nn as nn
 from tqdm import tqdm, trange
 
 from argparser import config_parser
-from nerf_utils import *
 from load_blender import load_blender_data
 from NeRF import NeRF
+from nerf_utils import *
+from nerf_ray_generate import generate_ray_batch_train, generate_ray_batch_test
+from nerf_ray_generate import generate_coarse_samples, generate_fine_samples
 
 np.random.seed(0)
 DEBUG = False
@@ -43,7 +45,8 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
     return all_ret
 
 
-def render(h, w, k, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
+def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
+           c2w=None, ndc=True,
            near=0., far=1., c2w_staticcam=None,
            **kwargs):
     """Render rays
@@ -79,6 +82,7 @@ def render(h, w, k, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
     if c2w_staticcam is not None:
         # special case to visualize effect of viewdirs
         rays_o, rays_d = get_rays(h, w, k, c2w_staticcam)
+
     view_dir = view_dir / torch.norm(view_dir, dim=-1, keepdim=True)
     view_dir = torch.reshape(view_dir, [-1, 3]).float()
 
@@ -96,7 +100,7 @@ def render(h, w, k, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
     rays = torch.cat([rays, view_dir], -1)
 
     # Render and reshape
-    all_ret = batchify_rays(rays, chunk, **kwargs)
+    all_ret = batchify_rays(ray_batch, chunk, **kwargs)
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = torch.reshape(all_ret[k], k_sh)
@@ -115,6 +119,7 @@ def render_path(render_poses, hwf, k, chunk, render_kwargs, gt_imgs=None, save_d
         h = h // render_factor
         w = w // render_factor
         focal = focal / render_factor
+        hwf = (h, w, focal)
 
     rgbs = []
     disps = []
@@ -123,7 +128,11 @@ def render_path(render_poses, hwf, k, chunk, render_kwargs, gt_imgs=None, save_d
     for i, c2w in enumerate(tqdm(render_poses)):
         print(i, time.time() - t)
         t = time.time()
-        rgb, disp, acc, _ = render(h, w, k, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        ray_batch = generate_ray_batch_test(hwf, k, c2w,
+                                            near=render_kwargs["near"],
+                                            far=render_kwargs["far"],
+                                            ndc=render_kwargs["ndc"])
+        rgb, disp, acc, _ = render(h, w, k, chunk=chunk, c2w=c2w[:3, :4], ray_batch=ray_batch, **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
         if i == 0:
@@ -495,8 +504,13 @@ def train():
         batch_rays = torch.stack([rays_o, rays_d], 0)
         target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
+        ray_batch, target_rgb = generate_ray_batch_train(images[i_train], poses[i_train],
+                                                         near, far, hwf, k, N_rand,
+                                                         curr_step=i, ndc=render_kwargs_train["ndc"],
+                                                         pre_crop_iter=args.precrop_iters,
+                                                         pre_crop_frac=args.precrop_frac)
         # Core optimization loop #
-        rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, rays=batch_rays, **render_kwargs_train)
+        rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, rays=batch_rays, **render_kwargs_train, ray_batch=ray_batch)
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
