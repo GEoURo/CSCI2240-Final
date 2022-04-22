@@ -97,7 +97,10 @@ def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
     rays = torch.cat([rays, view_dir], -1)
 
     # Render and reshape
-    all_ret = batchify_rays(ray_batch, chunk, **kwargs)
+    if c2w is not None:
+        all_ret = batchify_rays(ray_batch, chunk, **kwargs)
+    else:
+        all_ret = batchify_rays(rays, chunk, **kwargs)
 
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
@@ -333,8 +336,11 @@ def render_rays(ray_batch,
 
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
 
+    pts_coarse, view_dir_coarse, z_vals_coarse = generate_coarse_samples(ray_batch, n_coarse_sample,
+                                                                         inv_depth=lindisp, perturb=perturb)
+
     # query the coarse network
-    raw = network_query_fn(pts, view_dir, network_coarse)
+    raw = network_query_fn(pts_coarse, view_dir_coarse, network_coarse)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd)
 
     rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
