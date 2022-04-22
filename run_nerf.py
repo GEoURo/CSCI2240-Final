@@ -13,35 +13,16 @@ np.random.seed(0)
 DEBUG = False
 
 
-def batchify(fn, chunk):
-    """Constructs a version of 'fn' that applies to smaller batches.
-    """
-    if chunk is None:
-        return fn
+def run_network(pts, view_dir, model, chunk=1024 * 64):
+    xx = pts
+    pts_flatten = pts.view(pts.shape[0] * pts.shape[1], pts.shape[2])  # (N, 64, 3) -> (N * 64, 3)
+    view_dir = view_dir.view(view_dir.shape[0], 1, view_dir.shape[1])  # (N, 3) -> (N, 1, 3)
+    view_dir = view_dir.repeat(1, xx.shape[1], 1)  # (N, 1, 3) -> (N, 64, 3)
+    view_dir = view_dir.view(view_dir.shape[0] * view_dir.shape[1], view_dir.shape[2])  # (N, 64, 3) -> (N * 64, 3)
 
-    def ret(x, dir):
-        return torch.cat([fn(x[i:i + chunk], dir[i:i + chunk]) for i in range(0, x.shape[0], chunk)], 0)
-
-    return ret
-
-
-def run_network(inputs, d, fn, embed_fn, embeddirs_fn, netchunk=1024 * 64):
-    """Prepares inputs and applies network 'fn'.
-    """
-    # inputs_flat = torch.reshape(inputs, [-1, inputs.shape[-1]])
-    #
-    # if viewdirs is not None:
-    #     input_dirs = viewdirs[:,None].expand(inputs.shape)
-    #     input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
-
-    xx = inputs
-    x = inputs.view(inputs.shape[0] * inputs.shape[1], inputs.shape[2])  # (N, 64, 3) -> (N * 64, 3)
-    d = d.view(d.shape[0], 1, d.shape[1])  # (N, 3) -> (N, 1, 3)
-    d = d.repeat(1, xx.shape[1], 1)  # (N, 1, 3) -> (N, 64, 3)
-    d = d.view(d.shape[0] * d.shape[1], d.shape[2])  # (N, 64, 3) -> (N * 64, 3)
-
-    outputs_flat = batchify(fn, netchunk)(x, d)
-    outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
+    outputs_flat = torch.cat([model(pts_flatten[i:i + chunk], view_dir[i:i + chunk])
+                              for i in range(0, pts_flatten.shape[0], chunk)], 0)
+    outputs = torch.reshape(outputs_flat, list(pts.shape[:-1]) + [outputs_flat.shape[-1]])
     return outputs
 
 
@@ -169,34 +150,19 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
 
 
 def create_nerf(args):
-    """Instantiate NeRF's MLP model.
     """
-    # embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
-    #
-    # input_ch_views = 0
-    # embeddirs_fn = None
-    # if args.use_viewdirs:
-    #     embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
-    # output_ch = 5 if args.N_importance > 0 else 4
-    # skips = [4]
+    Instantiate NeRF's MLP model.
+    """
     model = NeRF(device=device)
-    # model = NeRF(D=args.netdepth, W=args.netwidth,
-    #              input_ch=input_ch, output_ch=output_ch, skips=skips,
-    #              input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
     grad_vars = list(model.parameters())
 
     model_fine = None
     if args.N_importance > 0:
         model_fine = NeRF(device=device)
-        # model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
-        #                   input_ch=input_ch, output_ch=output_ch, skips=skips,
-        #                   input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
         grad_vars += list(model_fine.parameters())
 
     network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
-                                                                        embed_fn=None,
-                                                                        embeddirs_fn=None,
-                                                                        netchunk=args.netchunk)
+                                                                        chunk=args.netchunk)
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
@@ -616,7 +582,7 @@ def train():
 
             return
 
-    # Prepare raybatch tensor if batching random rays
+    # Prepare ray batch tensor if batching random rays
     N_rand = args.N_rand
     use_batching = not args.no_batching
     if use_batching:
@@ -647,9 +613,6 @@ def train():
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
     print('VAL views are', i_val)
-
-    # Summary writers
-    # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
 
     start = start + 1
     for i in trange(start, N_iters):
@@ -709,7 +672,7 @@ def train():
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
-        trans = extras['raw'][..., -1]
+        # trans = extras['raw'][..., -1]
         loss = img_loss
         psnr = mse2psnr(img_loss)
 
