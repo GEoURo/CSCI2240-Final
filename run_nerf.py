@@ -107,13 +107,13 @@ def render(h, w, k, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
-    H, W, focal = hwf
+def render_path(render_poses, hwf, k, chunk, render_kwargs, gt_imgs=None, save_dir=None, render_factor=0):
+    h, w, focal = hwf
 
     if render_factor != 0:
         # Render downsampled for speed
-        H = H // render_factor
-        W = W // render_factor
+        h = h // render_factor
+        w = w // render_factor
         focal = focal / render_factor
 
     rgbs = []
@@ -123,7 +123,7 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
     for i, c2w in enumerate(tqdm(render_poses)):
         print(i, time.time() - t)
         t = time.time()
-        rgb, disp, acc, _ = render(H, W, K, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        rgb, disp, acc, _ = render(h, w, k, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
         if i == 0:
@@ -135,9 +135,9 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
             print(p)
         """
 
-        if savedir is not None:
+        if save_dir is not None:
             rgb8 = to8b(rgbs[-1])
-            filename = os.path.join(savedir, '{:03d}.png'.format(i))
+            filename = os.path.join(save_dir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, rgb8)
 
     rgbs = np.stack(rgbs, 0)
@@ -174,8 +174,8 @@ def create_nerf(args):
     if args.ft_path is not None and args.ft_path != 'None':
         ckpts = [args.ft_path]
     else:
-        ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
-                 'tar' in f]
+        ckpts = [os.path.join(basedir, expname, f)
+                 for f in sorted(os.listdir(os.path.join(basedir, expname))) if 'tar' in f]
 
     print('Found ckpts', ckpts)
     if len(ckpts) > 0 and not args.no_reload:
@@ -217,12 +217,16 @@ def create_nerf(args):
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False):
-    """Transforms model's predictions to semantically meaningful values.
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0., white_bkgd=False):
+    """
+    Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
         z_vals: [num_rays, num_samples along ray]. Integration time.
         rays_d: [num_rays, 3]. Direction of each ray.
+        raw_noise_std: float. The noise to add to the raw rgb output.
+        white_bkgd: boolean. If True, the image is rendered with white background.
+            The parameter is for blender dataset only
     Returns:
         rgb_map: [num_rays, 3]. Estimated RGB color of a ray.
         disp_map: [num_rays]. Disparity map. Inverse of depth map.
@@ -245,7 +249,6 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False):
         noise = torch.randn(raw[..., 3].shape) * raw_noise_std
 
     alpha = raw2alpha(raw[..., 3] + noise, dists)  # [N_rays, N_samples]
-    # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1. - alpha + 1e-10], -1), -1)[:, :-1]
     rgb_map = torch.sum(weights[..., None] * rgb, -2)  # [N_rays, 3]
 
@@ -440,7 +443,7 @@ def train():
             print('test poses shape', render_poses.shape)
 
             rgbs, _ = render_path(render_poses, hwf, k, args.chunk, render_kwargs_test, gt_imgs=images,
-                                  savedir=test_save_dir, render_factor=args.render_factor)
+                                  save_dir=test_save_dir, render_factor=args.render_factor)
             print('Done rendering', test_save_dir)
             imageio.mimwrite(os.path.join(test_save_dir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
 
@@ -532,14 +535,14 @@ def train():
             }, path)
             print('Saved checkpoints at', path)
 
-        if i % args.i_video == 0 and i > 0:
-            # Turn on testing mode
-            with torch.no_grad():
-                rgbs, disps = render_path(render_poses, hwf, k, args.chunk, render_kwargs_test)
-            print('Done, saving', rgbs.shape, disps.shape)
-            movie_base = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-            imageio.mimwrite(movie_base + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(movie_base + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
+        # if i % args.i_video == 0 and i > 0:
+        #     # Turn on testing mode
+        #     with torch.no_grad():
+        #         rgbs, disps = render_path(render_poses, hwf, k, args.chunk, render_kwargs_test)
+        #     print('Done, saving', rgbs.shape, disps.shape)
+        #     movie_base = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
+        #     imageio.mimwrite(movie_base + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
+        #     imageio.mimwrite(movie_base + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
 
         # if args.use_viewdirs:
         #     render_kwargs_test['c2w_staticcam'] = render_poses[0][:3,:4]
@@ -554,7 +557,7 @@ def train():
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
                 render_path(torch.Tensor(poses[i_test[:4]]).to(device), hwf, k, args.chunk, render_kwargs_test,
-                            gt_imgs=images[i_test], savedir=test_save_dir, render_factor=args.render_factor)
+                            gt_imgs=images[i_test], save_dir=test_save_dir, render_factor=args.render_factor)
             print('Saved test set')
 
         if i % args.i_print == 0:
