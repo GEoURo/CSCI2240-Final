@@ -79,9 +79,6 @@ def render(h, w, k, chunk=1024 * 32, rays=None, ray_batch=None,
 
     # provide ray directions as input
     view_dir = rays_d
-    if c2w_staticcam is not None:
-        # special case to visualize effect of viewdirs
-        rays_o, rays_d = get_rays(h, w, k, c2w_staticcam)
 
     view_dir = view_dir / torch.norm(view_dir, dim=-1, keepdim=True)
     view_dir = torch.reshape(view_dir, [-1, 3]).float()
@@ -480,6 +477,12 @@ def train():
         target = torch.Tensor(target).to(device)
         pose = poses[img_i, :3, :4]
 
+        ray_batch, target_rgb = generate_ray_batch_train(target, pose,
+                                                         near, far, hwf, k, N_rand,
+                                                         curr_step=i, ndc=render_kwargs_train["ndc"],
+                                                         pre_crop_iter=args.precrop_iters,
+                                                         pre_crop_frac=args.precrop_frac)
+
         rays_o, rays_d = get_rays(h, w, k, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
 
         if i < args.precrop_iters:
@@ -505,11 +508,6 @@ def train():
         batch_rays = torch.stack([rays_o, rays_d], 0)
         target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
-        ray_batch, target_rgb = generate_ray_batch_train(target, pose,
-                                                         near, far, hwf, k, N_rand,
-                                                         curr_step=i, ndc=render_kwargs_train["ndc"],
-                                                         pre_crop_iter=args.precrop_iters,
-                                                         pre_crop_frac=args.precrop_frac)
         # Core optimization loop #
         rgb, disp, acc, extras = render(h, w, k, chunk=args.chunk, rays=batch_rays, **render_kwargs_train, ray_batch=ray_batch)
 

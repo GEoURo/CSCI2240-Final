@@ -45,7 +45,7 @@ def generate_ray_batch_train(image, pose,
     The function will randomly choose an image and generate rays
 
     :param image: A image to generate rays
-    :param pose: The camera's transformation matrix
+    :param pose: An array of shape [3, 4]. The camera's transformation matrix
     :param near: float. The near plane for rendering.
     :param far: float. The far plane for rendering
     :param hwf: tuple. A tuple of (height, width, focal)
@@ -57,9 +57,6 @@ def generate_ray_batch_train(image, pose,
     :param pre_crop_frac: float. Fraction of a image taken for central crops
     :return: [rays_o, rays_d, near, far, view_dir], target_rgb
     """
-    target = torch.Tensor(image).to(device)
-    pose = pose[:3, :4]
-
     h, w, focal = hwf
 
     rays_o, rays_d = get_rays(h, w, k, torch.Tensor(pose))
@@ -87,7 +84,7 @@ def generate_ray_batch_train(image, pose,
 
     rays_o = rays_o[selected_coords[:, 0], selected_coords[:, 1]]  # (N_rand, 3)
     rays_d = rays_d[selected_coords[:, 0], selected_coords[:, 1]]  # (N_rand, 3)
-    target_rgb = target[selected_coords[:, 0], selected_coords[:, 1]]  # (N_rand, 3)
+    target_rgb = image[selected_coords[:, 0], selected_coords[:, 1]]  # (N_rand, 3)
 
     view_dir = rays_d
     # normalize the view directions
