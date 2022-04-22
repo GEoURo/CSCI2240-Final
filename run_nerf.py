@@ -410,7 +410,7 @@ def train():
 
     poses = torch.Tensor(poses).to(device)
 
-    n_iters = 2000 + 1
+    n_iters = 30000 + 1
     print('Begin')
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
