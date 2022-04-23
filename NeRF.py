@@ -46,6 +46,21 @@ class NeRF(nn.Module):
                  StemHiddenDim=256, ColorHiddenDim=128, GeoFeatDim=256,
                  RequiresPositionEmbedding=(0, 5), INGP=False,
                  BoundingBox=None, Log2TableSize=19, FinestRes=512):
+        """
+        :param StemDepth: int. The number of layers for position network
+        :param ColorDepth: int. The number of layers for color network
+        :param StemHiddenDim: int. The size of hidden dimension for position network
+        :param ColorHiddenDim: int. The size of hidden dimension for color network
+        :param GeoFeatDim: int. The dimension of geometry feature.
+            The feature will be first concatenated with view direction embedding
+            to serve as the input of the color network
+        :param RequiresPositionEmbedding: tuple. The layers in the position network
+            that requires position embedding as input.
+        :param INGP: bool. Enable instant neural graphic primitive
+        :param BoundingBox: array of shape [2, 3]. the bounding box of the scene.
+        :param Log2TableSize: int. log2(TableSize), default to 19.
+        :param FinestRes: int. Finest resolution of the hash table, default to 512.
+        """
         super(NeRF, self).__init__()
 
         self.__INGP = INGP
@@ -122,3 +137,6 @@ class NeRF(nn.Module):
         # combine color and sigma into one tensor
         out = torch.cat([c, sigma[:, None]], -1)
         return out
+
+    def isINGP(self):
+        return self.__INGP
