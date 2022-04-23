@@ -100,20 +100,20 @@ def config_parser():
                         help='will take every 1/N images as LLFF test set, paper uses 8')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=100,
+    parser.add_argument("--i_print", type=int, default=100,
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=500,
+    parser.add_argument("--i_img", type=int, default=500,
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=10000,
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=5000,
+    parser.add_argument("--i_testset", type=int, default=1000,
                         help='frequency of testset saving')
-    parser.add_argument("--i_video",   type=int, default=5000,
+    parser.add_argument("--i_video", type=int, default=5000,
                         help='frequency of render_poses video saving')
 
-    parser.add_argument("--finest_res",   type=int, default=512,
+    parser.add_argument("--finest_res", type=int, default=512,
                         help='finest resolution for hashed embedding')
-    parser.add_argument("--log2_hashmap_size",   type=int, default=19,
+    parser.add_argument("--log2_hashmap_size", type=int, default=19,
                         help='log2 of hashmap size')
     parser.add_argument("--sparse-loss-weight", type=float, default=1e-10,
                         help='learning rate')

@@ -2,13 +2,17 @@ import os
 import imageio
 import time
 import torch.nn as nn
+import torch.nn.functional
 
+from torch.distributions import Categorical
 from tqdm import tqdm, trange
 from datetime import datetime
+
+from NeRF import NeRF
+
 from argparser import config_parser
 from nerf_utils import *
 from load_blender import load_blender_data
-from NeRF import NeRF
 
 np.random.seed(0)
 DEBUG = False
@@ -47,7 +51,8 @@ def render(H, W, K, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
            near=0., far=1.,
            use_viewdirs=False, c2w_staticcam=None,
            **kwargs):
-    """Render rays
+    """
+    Render rays
     Args:
       H: int. Height of image in pixels.
       W: int. Width of image in pixels.
@@ -115,13 +120,14 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
     H, W, focal = hwf
 
     if render_factor != 0:
-        # Render downsampled for speed
+        # Render down-sampled image for speed
         H = H // render_factor
         W = W // render_factor
         focal = focal / render_factor
 
     rgbs = []
     disps = []
+    psnrs = []
 
     t = time.time()
     for i, c2w in enumerate(tqdm(render_poses)):
@@ -133,11 +139,10 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
         if i == 0:
             print(rgb.shape, disp.shape)
 
-        """
-        if gt_imgs is not None and render_factor==0:
+        if gt_imgs is not None and render_factor == 0:
             p = -10. * np.log10(np.mean(np.square(rgb.cpu().numpy() - gt_imgs[i])))
             print(p)
-        """
+            psnrs.append(p)
 
         if savedir is not None:
             rgb8 = to8b(rgbs[-1])
@@ -146,27 +151,51 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
 
     rgbs = np.stack(rgbs, 0)
     disps = np.stack(disps, 0)
+    if gt_imgs is not None and render_factor == 0:
+        print("Avg PSNR over Test set: ", sum(psnrs) / len(psnrs))
 
     return rgbs, disps
 
 
-def create_nerf(args):
+def create_nerf(args, bounding_box):
     """
     Instantiate NeRF's MLP model.
     """
-    model = NeRF().to(device)
+    if args.i_embed == 1:
+        model = NeRF(StemDepth=1, ColorDepth=3,
+                     StemHiddenDim=64, ColorHiddenDim=64,
+                     GeoFeatDim=15, RequiresPositionEmbedding=(0,),
+                     INGP=True, BoundingBox=bounding_box,
+                     Log2TableSize=args.log2_hashmap_size,
+                     FinestRes=args.finest_res).to(device)
+    else:
+        model = NeRF().to(device)
+
     grad_vars = list(model.parameters())
 
     model_fine = None
+
     if args.N_importance > 0:
-        model_fine = NeRF().to(device)
+        if args.i_embed == 1:
+            model_fine = NeRF(StemDepth=1, ColorDepth=3,
+                              StemHiddenDim=64, ColorHiddenDim=64,
+                              GeoFeatDim=15, RequiresPositionEmbedding=(0,),
+                              INGP=True, BoundingBox=bounding_box,
+                              Log2TableSize=args.log2_hashmap_size,
+                              FinestRes=args.finest_res).to(device)
+        else:
+            model_fine = NeRF().to(device)
+
         grad_vars += list(model_fine.parameters())
 
     network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
                                                                         chunk=args.netchunk)
 
     # Create optimizer
-    optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+    if args.i_embed == 1:
+        optimizer = torch.optim.RAdam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.99))
+    else:
+        optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
     start = 0
     basedir = args.basedir
@@ -223,7 +252,8 @@ def create_nerf(args):
 
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
-    """Transforms model's predictions to semantically meaningful values.
+    """
+    Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
         z_vals: [num_rays, num_samples along ray]. Integration time.
@@ -265,7 +295,12 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     if white_bkgd:
         rgb_map = rgb_map + (1. - acc_map[..., None])
 
-    return rgb_map, disp_map, acc_map, weights, depth_map
+    # Calculate weights sparsity loss
+    mask = weights.sum(-1) > 0.5
+    entropy = Categorical(probs=weights + 1e-5).entropy()
+    sparsity_loss = entropy * mask
+
+    return rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss
 
 
 def render_rays(ray_batch,
@@ -281,7 +316,8 @@ def render_rays(ray_batch,
                 raw_noise_std=0.,
                 verbose=False,
                 pytest=False):
-    """Volumetric rendering.
+    """
+    Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
         for sampling along a ray, including: ray origin, ray direction, min
@@ -345,11 +381,11 @@ def render_rays(ray_batch,
 
     #     raw = run_network(pts)
     raw = network_query_fn(pts, viewdirs, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
-                                                                 pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
+                                                                                white_bkgd, pytest=pytest)
 
     if N_importance > 0:
-        rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
+        rgb_map_0, disp_map_0, acc_map_0, sparsity_loss_0 = rgb_map, disp_map, acc_map, sparsity_loss
 
         z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
         z_samples = sample_pdf(z_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
@@ -363,16 +399,17 @@ def render_rays(ray_batch,
         #         raw = run_network(pts, fn=run_fn)
         raw = network_query_fn(pts, viewdirs, run_fn)
 
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
-                                                                     pytest=pytest)
+        rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
+                                                                                    white_bkgd, pytest=pytest)
 
-    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map}
+    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'sparsity_loss': sparsity_loss}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
         ret['rgb0'] = rgb_map_0
         ret['disp0'] = disp_map_0
         ret['acc0'] = acc_map_0
+        ret['sparsity_loss0'] = sparsity_loss_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
 
     for k in ret:
@@ -389,7 +426,9 @@ def train():
     # Load data
     K = None
     if args.dataset_type == 'blender':
-        images, poses, render_poses, hwf, i_split, bounding_box = load_blender_data(args.datadir, args.half_res, args.testskip)
+        images, poses, render_poses, hwf, i_split, bounding_box = load_blender_data(args.datadir, args.half_res,
+                                                                                    args.testskip)
+        args.bounding_box = bounding_box
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
 
@@ -421,10 +460,14 @@ def train():
         render_poses = np.array(poses[i_test])
 
     # Create log dir and copy the config file
+    basedir = args.basedir
+    if args.i_embed == 1:
+        args.expname += "_INGP"
+    args.expname += "_log2T" + str(args.log2_hashmap_size)
     args.expname += datetime.now().strftime('_%H_%M_%d')
 
-    basedir = args.basedir
     expname = args.expname
+    print("expname:", expname)
 
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
@@ -438,7 +481,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, bounding_box)
     global_step = start
 
     bds_dict = {
@@ -479,12 +522,15 @@ def train():
 
     poses = torch.Tensor(poses).to(device)
 
-    N_iters = 200000 + 1
+    N_iters = 2000 + 1
     print('Begin')
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
     print('VAL views are', i_val)
 
+    loss_list = []
+    psnr_list = []
+    time_list = []
     start = start + 1
     for i in trange(start, N_iters):
         time0 = time.time()
@@ -536,6 +582,23 @@ def train():
             loss = loss + img_loss0
             psnr0 = mse2psnr(img_loss0)
 
+        sparsity_loss = args.sparse_loss_weight * (extras["sparsity_loss"].sum() + extras["sparsity_loss0"].sum())
+        loss = loss + sparsity_loss
+
+        # add Total Variation loss
+        # if args.i_embed==1:
+        #     n_levels = render_kwargs_train["embed_fn"].n_levels
+        #     min_res = render_kwargs_train["embed_fn"].base_resolution
+        #     max_res = render_kwargs_train["embed_fn"].finest_resolution
+        #     log2_hashmap_size = render_kwargs_train["embed_fn"].log2_hashmap_size
+        #     TV_loss = sum(total_variation_loss(render_kwargs_train["embed_fn"].embeddings[i], \
+        #                                       min_res, max_res, \
+        #                                       i, log2_hashmap_size, \
+        #                                       n_levels=n_levels) for i in range(n_levels))
+        #     loss = loss + args.tv_loss_weight * TV_loss
+        #     if i>1000:
+        #         args.tv_loss_weight = 0.0
+
         loss.backward()
         optimizer.step()
 
@@ -548,7 +611,7 @@ def train():
             param_group['lr'] = new_lrate
         ################################
 
-        dt = time.time() - time0
+        t = time.time() - time0
         # print(f"Step: {global_step}, Loss: {loss}, Time: {dt}")
         #####           end            #####
 
@@ -563,21 +626,21 @@ def train():
             }, path)
             print('Saved checkpoints at', path)
 
-        # if i%args.i_video==0 and i > 0:
-        #     # Turn on testing mode
-        #     with torch.no_grad():
-        #         rgbs, disps = render_path(render_poses, hwf, K, args.chunk, render_kwargs_test)
-        #     print('Done, saving', rgbs.shape, disps.shape)
-        #     moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
-        #     imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-        #     imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
+        if i % args.i_video == 0 and i > 0:
+            # Turn on testing mode
+            with torch.no_grad():
+                rgbs, disps = render_path(render_poses, hwf, K, args.chunk, render_kwargs_test)
+            print('Done, saving', rgbs.shape, disps.shape)
+            moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
+            imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
+            imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
 
-        # if args.use_viewdirs:
-        #     render_kwargs_test['c2w_staticcam'] = render_poses[0][:3,:4]
-        #     with torch.no_grad():
-        #         rgbs_still, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
-        #     render_kwargs_test['c2w_staticcam'] = None
-        #     imageio.mimwrite(moviebase + 'rgb_still.mp4', to8b(rgbs_still), fps=30, quality=8)
+            # if args.use_viewdirs:
+            #     render_kwargs_test['c2w_staticcam'] = render_poses[0][:3,:4]
+            #     with torch.no_grad():
+            #         rgbs_still, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
+            #     render_kwargs_test['c2w_staticcam'] = None
+            #     imageio.mimwrite(moviebase + 'rgb_still.mp4', to8b(rgbs_still), fps=30, quality=8)
 
         if i % args.i_testset == 0 and i > 0:
             testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
@@ -585,11 +648,21 @@ def train():
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
                 render_path(torch.Tensor(poses[i_test[:4]]).to(device), hwf, K, args.chunk, render_kwargs_test,
-                            gt_imgs=images[i_test], savedir=testsavedir, render_factor=args.render_factor)
+                            gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
 
         if i % args.i_print == 0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+            # loss_list.append(loss.item())
+            # psnr_list.append(psnr.item())
+            # time_list.append(t)
+            # loss_psnr_time = {
+            #     "losses": loss_list,
+            #     "psnr": psnr_list,
+            #     "time": time_list
+            # }
+            # with open(os.path.join(basedir, expname, "loss_vs_time.pkl"), "wb") as fp:
+            #     pickle.dump(loss_psnr_time, fp)
 
         global_step += 1
 

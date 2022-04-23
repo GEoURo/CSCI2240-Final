@@ -158,7 +158,7 @@ def generate_coarse_samples(ray_batch, n_sample, inv_depth=False, perturb=True):
 
 def generate_fine_samples(ray_batch, z_vals, weights, n_sample, perturb=True, pytest=False):
     """
-
+    Generate fine point samples for a batch of ray
     :param ray_batch: Tensor. The compact ray batch returned from generate_ray_batch functions.
                       Must have the shape of (N, 3)
     :param z_vals: array of shape (n_rays, n_coarse_samples). The z values for each coarse sample.

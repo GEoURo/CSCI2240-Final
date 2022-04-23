@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional
+from hash_encoder import INGPHashEncoder, SHEncoder
 
 ReLUGain = math.sqrt(2)
 
@@ -16,37 +17,58 @@ def MSRInitializer(Layer, ActivationGain=1.0):
     return Layer
 
 
-def CreateEmbeddingFunction(L):
-    def EmbeddingFunction(x):
-        FrequencyRepresentation = [x]  # ??? inconsistent with the paper
-        for y in range(L):
-            FrequencyRepresentation += [torch.sin(2 ** y * x), torch.cos(2 ** y * x)]
-        return torch.cat(FrequencyRepresentation, dim=1)
+def CreateEmbedding(EmbeddingType, L=10,
+                    BoundingBox=None, Log2TableSize=19, FinestRes=512):
+    if EmbeddingType == "hash":
+        HashTable = INGPHashEncoder(bounding_box=BoundingBox,
+                                    log2_table_size=Log2TableSize,
+                                    finest_resolution=FinestRes)
+        return HashTable, HashTable.output_dim
 
-    return EmbeddingFunction
+    elif EmbeddingType == "spherical":
+        SphericalHarmonics = SHEncoder()
+        return SphericalHarmonics, SphericalHarmonics.out_dim
+
+    elif EmbeddingType == "pos":
+        def EmbeddingFunction(x):
+            FrequencyRepresentation = [x]  # ??? inconsistent with the paper
+            for y in range(L):
+                FrequencyRepresentation += [torch.sin(2 ** y * x), torch.cos(2 ** y * x)]
+            return torch.cat(FrequencyRepresentation, dim=1)
+
+        return EmbeddingFunction, 6 * L + 3
+
+    return nn.Identity, 3
 
 
 class NeRF(nn.Module):
     def __init__(self, StemDepth=8, ColorDepth=2,
                  StemHiddenDim=256, ColorHiddenDim=128, GeoFeatDim=256,
-                 RequiresPositionEmbedding=(0, 5)):
+                 RequiresPositionEmbedding=(0, 5), INGP=False,
+                 BoundingBox=None, Log2TableSize=19, FinestRes=512):
         super(NeRF, self).__init__()
 
-        LPosition = 10
-        LDirection = 4
-        PositionEmbeddingDimension = 6 * LPosition + 3  # 6 * LPosition if consistent with the paper
-        DirectionEmbeddingDimension = 6 * LDirection + 3  # 6 * LDirection if consistent with the paper
+        self.__INGP = INGP
 
-        self.PositionEmbeddingFunction = CreateEmbeddingFunction(LPosition)
-        self.DirectionEmbeddingFunction = CreateEmbeddingFunction(LDirection)
+        # create position and direction encoding
+        if INGP:
+            self.PositionEmbedding, PositionEmbeddingDim = CreateEmbedding(EmbeddingType="hash",
+                                                                           BoundingBox=BoundingBox,
+                                                                           Log2TableSize=Log2TableSize,
+                                                                           FinestRes=FinestRes)
+
+            self.DirectionEmbedding, DirectionEmbeddingDim = CreateEmbedding(EmbeddingType="spherical")
+        else:
+            self.PositionEmbedding, PositionEmbeddingDim = CreateEmbedding(EmbeddingType="pos", L=10)
+            self.DirectionEmbedding, DirectionEmbeddingDim = CreateEmbedding(EmbeddingType="pos", L=4)
 
         StemLayers = []
         for x in range(StemDepth):
             if x == 0 and x in RequiresPositionEmbedding:
-                InputDimension = PositionEmbeddingDimension
+                InputDimension = PositionEmbeddingDim
                 RequiresAuxiliaryInput = False
             elif x in RequiresPositionEmbedding:
-                InputDimension = PositionEmbeddingDimension + StemHiddenDim
+                InputDimension = PositionEmbeddingDim + StemHiddenDim
                 RequiresAuxiliaryInput = True
             else:
                 InputDimension = StemHiddenDim
@@ -62,7 +84,7 @@ class NeRF(nn.Module):
         ColorLayers = []
         for i in range(ColorDepth):
             if i == 0:
-                InputDimension = DirectionEmbeddingDimension + GeoFeatDim
+                InputDimension = DirectionEmbeddingDim + GeoFeatDim
                 OutputDimension = ColorHiddenDim
             elif i == ColorDepth - 1:
                 InputDimension = ColorHiddenDim
@@ -76,8 +98,8 @@ class NeRF(nn.Module):
         self.ColorLayers = nn.ModuleList(ColorLayers)
 
     def forward(self, x, d):
-        x = self.PositionEmbeddingFunction(x)
-        d = self.DirectionEmbeddingFunction(d)
+        x = self.PositionEmbedding(x)
+        d = self.DirectionEmbedding(d)
 
         y = x
         for Layer in self.StemLayers:

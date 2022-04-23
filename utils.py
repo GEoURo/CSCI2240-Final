@@ -1,7 +1,9 @@
-import torch
+import json
 import numpy as np
+import torch
 
 from load_utils import get_rays, get_ray_directions, get_ndc_rays
+
 
 # [000, 001, 010, 011, 100, 101, 110, 111]
 BOX_OFFSETS = torch.tensor([[[i, j, k] for i in [0, 1] for j in [0, 1] for k in [0, 1]]],
@@ -76,39 +78,6 @@ def get_bbox3d_for_llff(poses, hwf, near=0.0, far=1.0):
 
     return (torch.tensor(min_bound) - torch.tensor([0.1, 0.1, 0.0001]),
             torch.tensor(max_bound) + torch.tensor([0.1, 0.1, 0.0001]))
-
-
-def get_voxel_vertices(xyz, bounding_box, resolution, log2_hashmap_size):
-    '''
-    xyz: 3D coordinates of samples. B x 3
-    bounding_box: min and max x,y,z coordinates of object bbox
-    resolution: number of voxels per axis
-    '''
-    box_min, box_max = bounding_box
-
-    if not torch.all(xyz <= box_max) or not torch.all(xyz >= box_min):
-        # print("ALERT: some points are outside bounding box. Clipping them!")
-        pdb.set_trace()
-        xyz = torch.clamp(xyz, min=box_min, max=box_max)
-
-    grid_size = (box_max - box_min) / resolution
-
-    bottom_left_idx = torch.floor((xyz - box_min) / grid_size).int()
-    voxel_min_vertex = bottom_left_idx * grid_size + box_min
-    voxel_max_vertex = voxel_min_vertex + torch.tensor([1.0, 1.0, 1.0]) * grid_size
-
-    # hashed_voxel_indices = [] # B x 8 ... 000,001,010,011,100,101,110,111
-    # for i in [0, 1]:
-    #     for j in [0, 1]:
-    #         for k in [0, 1]:
-    #             vertex_idx = bottom_left_idx + torch.tensor([i,j,k])
-    #             # vertex = bottom_left + torch.tensor([i,j,k])*grid_size
-    #             hashed_voxel_indices.append(hash(vertex_idx, log2_hashmap_size))
-
-    voxel_indices = bottom_left_idx.unsqueeze(1) + BOX_OFFSETS
-    hashed_voxel_indices = hash(voxel_indices, log2_hashmap_size)
-
-    return voxel_min_vertex, voxel_max_vertex, hashed_voxel_indices
 
 
 if __name__ == "__main__":
