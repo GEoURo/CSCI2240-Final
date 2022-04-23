@@ -154,12 +154,12 @@ def create_nerf(args):
     """
     Instantiate NeRF's MLP model.
     """
-    model = NeRF(device=device)
+    model = NeRF().to(device)
     grad_vars = list(model.parameters())
 
     model_fine = None
     if args.N_importance > 0:
-        model_fine = NeRF(device=device)
+        model_fine = NeRF().to(device)
         grad_vars += list(model_fine.parameters())
 
     network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,

@@ -26,7 +26,7 @@ def CreateEmbeddingFunction(L):
 
 
 class NeRF(nn.Module):
-    def __init__(self, StemDepth=8, HiddenDimension=256, RequiresPositionEmbedding=[0, 5], device='cpu'):
+    def __init__(self, StemDepth=8, HiddenDimension=256, RequiresPositionEmbedding=[0, 5]):
         super(NeRF, self).__init__()
 
         LPosition = 10
@@ -46,25 +46,24 @@ class NeRF(nn.Module):
                 InputDimension = HiddenDimension
                 RequiresAuxiliaryInput = False
             StemLayers += [
-                MSRInitializer(nn.Linear(InputDimension, HiddenDimension), ActivationGain=ReLUGain).to(device)]
+                MSRInitializer(nn.Linear(InputDimension, HiddenDimension), ActivationGain=ReLUGain)]
             StemLayers[-1].RequiresAuxiliaryInput = RequiresAuxiliaryInput
 
-        self.StemLayers = nn.ModuleList(StemLayers).to(device)
+        self.StemLayers = nn.ModuleList(StemLayers)
 
-        self.DensityLayer = MSRInitializer(nn.Linear(HiddenDimension, 1)).to(device)
+        self.DensityLayer = MSRInitializer(nn.Linear(HiddenDimension, 1))
 
-        self.RGBLayer1 = MSRInitializer(nn.Linear(HiddenDimension, HiddenDimension)).to(device)
+        self.RGBLayer1 = MSRInitializer(nn.Linear(HiddenDimension, HiddenDimension))
         self.RGBLayer2 = MSRInitializer(nn.Linear(DirectionEmbeddingDimension + HiddenDimension, HiddenDimension // 2),
-                                        ActivationGain=ReLUGain).to(device)
-        self.RGBLayer3 = MSRInitializer(nn.Linear(HiddenDimension // 2, 3)).to(device)
+                                        ActivationGain=ReLUGain)
+        self.RGBLayer3 = MSRInitializer(nn.Linear(HiddenDimension // 2, 3))
 
         self.PositionEmbeddingFunction = CreateEmbeddingFunction(LPosition)
         self.DirectionEmbeddingFunction = CreateEmbeddingFunction(LDirection)
-        self.device = device
 
     def forward(self, x, d):
-        x = self.PositionEmbeddingFunction(x).to(self.device)
-        d = self.DirectionEmbeddingFunction(d).to(self.device)
+        x = self.PositionEmbeddingFunction(x)
+        d = self.DirectionEmbeddingFunction(d)
 
         y = x
         for Layer in self.StemLayers:
