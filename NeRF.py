@@ -1,11 +1,12 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional
 
 ReLUGain = math.sqrt(2)
 
 
-def MSRInitializer(Layer, ActivationGain=1):
+def MSRInitializer(Layer, ActivationGain=1.0):
     FanIn = Layer.weight.data.size(1) * Layer.weight.data[0][0].numel()
     Layer.weight.data.normal_(0, ActivationGain / math.sqrt(FanIn))
 
@@ -26,7 +27,9 @@ def CreateEmbeddingFunction(L):
 
 
 class NeRF(nn.Module):
-    def __init__(self, StemDepth=8, HiddenDimension=256, RequiresPositionEmbedding=[0, 5]):
+    def __init__(self, StemDepth=8, ColorDepth=2,
+                 StemHiddenDim=256, ColorHiddenDim=128, GeoFeatDim=256,
+                 RequiresPositionEmbedding=(0, 5)):
         super(NeRF, self).__init__()
 
         LPosition = 10
@@ -34,32 +37,43 @@ class NeRF(nn.Module):
         PositionEmbeddingDimension = 6 * LPosition + 3  # 6 * LPosition if consistent with the paper
         DirectionEmbeddingDimension = 6 * LDirection + 3  # 6 * LDirection if consistent with the paper
 
+        self.PositionEmbeddingFunction = CreateEmbeddingFunction(LPosition)
+        self.DirectionEmbeddingFunction = CreateEmbeddingFunction(LDirection)
+
         StemLayers = []
         for x in range(StemDepth):
             if x == 0 and x in RequiresPositionEmbedding:
                 InputDimension = PositionEmbeddingDimension
                 RequiresAuxiliaryInput = False
             elif x in RequiresPositionEmbedding:
-                InputDimension = PositionEmbeddingDimension + HiddenDimension
+                InputDimension = PositionEmbeddingDimension + StemHiddenDim
                 RequiresAuxiliaryInput = True
             else:
-                InputDimension = HiddenDimension
+                InputDimension = StemHiddenDim
                 RequiresAuxiliaryInput = False
-            StemLayers += [
-                MSRInitializer(nn.Linear(InputDimension, HiddenDimension), ActivationGain=ReLUGain)]
+            StemLayers += [MSRInitializer(nn.Linear(InputDimension, StemHiddenDim), ActivationGain=ReLUGain)]
             StemLayers[-1].RequiresAuxiliaryInput = RequiresAuxiliaryInput
 
         self.StemLayers = nn.ModuleList(StemLayers)
 
-        self.DensityLayer = MSRInitializer(nn.Linear(HiddenDimension, 1))
+        self.DensityLayer = MSRInitializer(nn.Linear(StemHiddenDim, 1))
+        self.GeoFeatLayer = MSRInitializer(nn.Linear(StemHiddenDim, GeoFeatDim))
 
-        self.RGBLayer1 = MSRInitializer(nn.Linear(HiddenDimension, HiddenDimension))
-        self.RGBLayer2 = MSRInitializer(nn.Linear(DirectionEmbeddingDimension + HiddenDimension, HiddenDimension // 2),
-                                        ActivationGain=ReLUGain)
-        self.RGBLayer3 = MSRInitializer(nn.Linear(HiddenDimension // 2, 3))
+        ColorLayers = []
+        for i in range(ColorDepth):
+            if i == 0:
+                InputDimension = DirectionEmbeddingDimension + GeoFeatDim
+                OutputDimension = ColorHiddenDim
+            elif i == ColorDepth - 1:
+                InputDimension = ColorHiddenDim
+                OutputDimension = 3
+            else:
+                InputDimension = ColorHiddenDim
+                OutputDimension = ColorHiddenDim
 
-        self.PositionEmbeddingFunction = CreateEmbeddingFunction(LPosition)
-        self.DirectionEmbeddingFunction = CreateEmbeddingFunction(LDirection)
+            ColorLayers += [MSRInitializer(nn.Linear(InputDimension, OutputDimension), ActivationGain=ReLUGain)]
+
+        self.ColorLayers = nn.ModuleList(ColorLayers)
 
     def forward(self, x, d):
         x = self.PositionEmbeddingFunction(x)
@@ -75,9 +89,13 @@ class NeRF(nn.Module):
 
         sigma = self.DensityLayer(y).view(x.shape[0])
 
-        c = torch.cat([self.RGBLayer1(y), d], dim=1)
-        c = nn.functional.relu(self.RGBLayer2(c))
-        c = self.RGBLayer3(c)
+        c = torch.cat([self.GeoFeatLayer(y), d], dim=1)
+
+        for i, Layer in enumerate(self.StemLayers):
+            if i == len(self.StemLayers) - 1:
+                c = Layer(c)
+            else:
+                c = nn.functional.relu(Layer(c))
 
         # combine color and sigma into one tensor
         out = torch.cat([c, sigma[:, None]], -1)

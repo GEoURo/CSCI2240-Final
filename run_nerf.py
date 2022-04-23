@@ -4,7 +4,7 @@ import time
 import torch.nn as nn
 
 from tqdm import tqdm, trange
-
+from datetime import datetime
 from argparser import config_parser
 from nerf_utils import *
 from load_blender import load_blender_data
@@ -421,8 +421,11 @@ def train():
         render_poses = np.array(poses[i_test])
 
     # Create log dir and copy the config file
+    args.expname += datetime.now().strftime('_%H_%M_%d')
+
     basedir = args.basedir
     expname = args.expname
+
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
