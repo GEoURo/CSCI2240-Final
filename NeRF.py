@@ -91,8 +91,8 @@ class NeRF(nn.Module):
 
         c = torch.cat([self.GeoFeatLayer(y), d], dim=1)
 
-        for i, Layer in enumerate(self.StemLayers):
-            if i == len(self.StemLayers) - 1:
+        for i, Layer in enumerate(self.ColorLayers):
+            if i == len(self.ColorLayers) - 1:
                 c = Layer(c)
             else:
                 c = nn.functional.relu(Layer(c))
