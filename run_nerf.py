@@ -81,14 +81,13 @@ def render(H, W, K, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
         # use provided ray batch
         rays_o, rays_d = rays
 
-    if use_viewdirs:
-        # provide ray directions as input
-        viewdirs = rays_d
-        if c2w_staticcam is not None:
-            # special case to visualize effect of viewdirs
-            rays_o, rays_d = get_rays(H, W, K, c2w_staticcam)
-        viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
-        viewdirs = torch.reshape(viewdirs, [-1, 3]).float()
+    # provide ray directions as input
+    viewdirs = rays_d
+    if c2w_staticcam is not None:
+        # special case to visualize effect of viewdirs
+        rays_o, rays_d = get_rays(H, W, K, c2w_staticcam)
+    viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
+    viewdirs = torch.reshape(viewdirs, [-1, 3]).float()
 
     sh = rays_d.shape  # [..., 3]
     if ndc:
@@ -101,8 +100,7 @@ def render(H, W, K, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
 
     near, far = near * torch.ones_like(rays_d[..., :1]), far * torch.ones_like(rays_d[..., :1])
     rays = torch.cat([rays_o, rays_d, near, far], -1)
-    if use_viewdirs:
-        rays = torch.cat([rays, viewdirs], -1)
+    rays = torch.cat([rays, viewdirs], -1)
 
     # Render and reshape
     all_ret = batchify_rays(rays, chunk, **kwargs)
@@ -124,6 +122,7 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
         H = H // render_factor
         W = W // render_factor
         focal = focal / render_factor
+        hwf = (H, W, focal)
 
     rgbs = []
     disps = []
@@ -157,7 +156,7 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
     return rgbs, disps
 
 
-def create_nerf(args, bounding_box):
+def create_nerf(args, bounding_box=None):
     """
     Instantiate NeRF's MLP model.
     """
@@ -251,7 +250,7 @@ def create_nerf(args, bounding_box):
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0., white_bkgd=False, pytest=False):
     """
     Transforms model's predictions to semantically meaningful values.
     Args:
@@ -379,28 +378,26 @@ def render_rays(ray_batch,
 
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
 
-    #     raw = run_network(pts)
+    # query network with coarse samples
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
                                                                                 white_bkgd, pytest=pytest)
 
-    if N_importance > 0:
-        rgb_map_0, disp_map_0, acc_map_0, sparsity_loss_0 = rgb_map, disp_map, acc_map, sparsity_loss
+    rgb_map_0, disp_map_0, acc_map_0, sparsity_loss_0 = rgb_map, disp_map, acc_map, sparsity_loss
 
-        z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        z_samples = sample_pdf(z_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
-        z_samples = z_samples.detach()
+    z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
+    z_samples = sample_pdf(z_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
+    z_samples = z_samples.detach()
 
-        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :,
-                                                            None]  # [N_rays, N_samples + N_importance, 3]
+    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
 
-        run_fn = network_fn if network_fine is None else network_fine
-        #         raw = run_network(pts, fn=run_fn)
-        raw = network_query_fn(pts, viewdirs, run_fn)
+    # query network with coarse and fine samples
+    run_fn = network_fn if network_fine is None else network_fine
+    raw = network_query_fn(pts, viewdirs, run_fn)
 
-        rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
-                                                                                    white_bkgd, pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
+                                                                                white_bkgd, pytest=pytest)
 
     ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'sparsity_loss': sparsity_loss}
     if retraw:
@@ -412,9 +409,10 @@ def render_rays(ray_batch,
         ret['sparsity_loss0'] = sparsity_loss_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
 
-    for k in ret:
-        if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
-            print(f"! [Numerical Error] {k} contains nan or inf.")
+    if DEBUG:
+        for k in ret:
+            if torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any():
+                print(f"! [Numerical Error] {k} contains nan or inf.")
 
     return ret
 
@@ -463,7 +461,7 @@ def train():
     basedir = args.basedir
     if args.i_embed == 1:
         args.expname += "_INGP"
-    args.expname += "_log2T" + str(args.log2_hashmap_size)
+        args.expname += "_log2T" + str(args.log2_hashmap_size)
     args.expname += datetime.now().strftime('_%H_%M_%d')
 
     expname = args.expname
@@ -481,7 +479,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, bounding_box)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, bounding_box=bounding_box)
     global_step = start
 
     bds_dict = {
