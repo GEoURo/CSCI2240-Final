@@ -520,7 +520,7 @@ def train():
 
     poses = torch.Tensor(poses).to(device)
 
-    N_iters = 10000 + 1
+    N_iters = 20000 + 1
     print('Begin')
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
@@ -645,7 +645,7 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
-                render_path(torch.Tensor(poses[i_test[:4]]).to(device), hwf, K, args.chunk, render_kwargs_test,
+                render_path(torch.Tensor(poses[i_test]).to(device), hwf, K, args.chunk, render_kwargs_test,
                             gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
 

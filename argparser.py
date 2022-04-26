@@ -104,11 +104,11 @@ def config_parser():
                         help='frequency of console printout and metric loggin')
     parser.add_argument("--i_img", type=int, default=500,
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=10000,
+    parser.add_argument("--i_weights", type=int, default=20000,
                         help='frequency of weight ckpt saving')
     parser.add_argument("--i_testset", type=int, default=5000,
                         help='frequency of testset saving')
-    parser.add_argument("--i_video", type=int, default=5000,
+    parser.add_argument("--i_video", type=int, default=10000,
                         help='frequency of render_poses video saving')
 
     parser.add_argument("--finest_res", type=int, default=512,
