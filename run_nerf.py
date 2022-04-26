@@ -430,8 +430,8 @@ def train():
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
 
-        near = 2.
-        far = 6.
+        near = 0.1
+        far = 2
 
         if args.white_bkgd:
             images = images[..., :3] * images[..., -1:] + (1. - images[..., -1:])
@@ -520,7 +520,7 @@ def train():
 
     poses = torch.Tensor(poses).to(device)
 
-    N_iters = 20000 + 1
+    N_iters = args.N_iters + 1
     print('Begin')
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
