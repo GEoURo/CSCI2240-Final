@@ -138,3 +138,5 @@ dmypy.json
 .pyre/
 
 /data
+run.sh.e*
+run.sh.o*
