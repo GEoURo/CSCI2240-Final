@@ -85,8 +85,8 @@ def load_blender_data(basedir, half_res=False, testskip=1):
         imgs = imgs_half_res
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
 
-    near = 0.0
-    far = 6.0
+    near = 0.1
+    far = 4
     bounding_box = get_bbox3d_for_blenderobj(metas["train"], H, W, near=near, far=far)
 
     return imgs, poses, render_poses, [H, W, focal], i_split, bounding_box, near, far
