@@ -424,14 +424,12 @@ def train():
     # Load data
     K = None
     if args.dataset_type == 'blender':
-        images, poses, render_poses, hwf, i_split, bounding_box = load_blender_data(args.datadir, args.half_res,
-                                                                                    args.testskip)
+        images, poses, render_poses, hwf, i_split, bounding_box, near, far = load_blender_data(args.datadir,
+                                                                                               args.half_res,
+                                                                                               args.testskip)
         args.bounding_box = bounding_box
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
-
-        near = 0.1
-        far = 2
 
         if args.white_bkgd:
             images = images[..., :3] * images[..., -1:] + (1. - images[..., -1:])
