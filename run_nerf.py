@@ -462,7 +462,7 @@ def train():
     if args.i_embed == 1:
         args.expname += "_INGP"
         args.expname += "_log2T" + str(args.log2_hashmap_size)
-    args.expname += datetime.now().strftime('_%H_%M_%d')
+    args.expname += datetime.now().strftime('_%d_%H_%M')
 
     expname = args.expname
     print("expname:", expname)
