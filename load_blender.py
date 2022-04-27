@@ -74,6 +74,10 @@ def load_blender_data(basedir, half_res=False, testskip=1):
 
     render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 40 + 1)[:-1]], 0)
 
+    near = 0.1
+    far = 4
+    bounding_box = get_bbox3d_for_blenderobj(metas["train"], H, W, near=near, far=far)
+
     if half_res:
         H = H // 2
         W = W // 2
@@ -84,9 +88,5 @@ def load_blender_data(basedir, half_res=False, testskip=1):
             imgs_half_res[i] = cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA)
         imgs = imgs_half_res
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
-
-    near = 0.1
-    far = 4
-    bounding_box = get_bbox3d_for_blenderobj(metas["train"], H, W, near=near, far=far)
 
     return imgs, poses, render_poses, [H, W, focal], i_split, bounding_box, near, far
