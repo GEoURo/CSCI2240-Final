@@ -75,7 +75,7 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 40 + 1)[:-1]], 0)
 
     near = 0.1
-    far = 4
+    far = 2
     bounding_box = get_bbox3d_for_blenderobj(metas["train"], H, W, near=near, far=far)
 
     if half_res:
