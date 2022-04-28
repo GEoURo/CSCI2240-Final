@@ -27,9 +27,9 @@ def config_parser():
                         help='learning rate')
     parser.add_argument("--lrate_decay", type=int, default=250,
                         help='exponential learning rate decay (in 1000 steps)')
-    parser.add_argument("--chunk", type=int, default=1024 * 32,
+    parser.add_argument("--chunk", type=int, default=1024 * 128,
                         help='number of rays processed in parallel, decrease if running out of memory')
-    parser.add_argument("--netchunk", type=int, default=1024 * 64,
+    parser.add_argument("--netchunk", type=int, default=1024 * 256,
                         help='number of pts sent through network in parallel, decrease if running out of memory')
     parser.add_argument("--no_batching", action='store_true',
                         help='only take random rays from 1 image at a time')
@@ -102,7 +102,7 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--N_iters", type=int, default=20000,
                         help='total iterations to train')
-    parser.add_argument("--i_print", type=int, default=100,
+    parser.add_argument("--i_print", type=int, default=1000,
                         help='frequency of console printout and metric loggin')
     parser.add_argument("--i_img", type=int, default=500,
                         help='frequency of tensorboard image logging')
@@ -113,7 +113,7 @@ def config_parser():
     parser.add_argument("--i_video", type=int, default=10000,
                         help='frequency of render_poses video saving')
 
-    parser.add_argument("--finest_res", type=int, default=512,
+    parser.add_argument("--finest_res", type=int, default=1024,
                         help='finest resolution for hashed embedding')
     parser.add_argument("--log2_hashmap_size", type=int, default=19,
                         help='log2 of hashmap size')
