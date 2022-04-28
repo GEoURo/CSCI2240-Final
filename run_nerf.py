@@ -643,8 +643,8 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
-                render_path(torch.Tensor(poses[i_test]).to(device), hwf, K, args.chunk, render_kwargs_test,
-                            gt_imgs=images[i_test], savedir=testsavedir)
+                render_path(torch.Tensor(poses[i_train[0:3]]).to(device), hwf, K, args.chunk, render_kwargs_test,
+                            gt_imgs=images[i_train[0:3]], savedir=testsavedir)
             print('Saved test set')
 
         if i % args.i_print == 0:
