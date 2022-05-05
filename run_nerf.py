@@ -1,6 +1,7 @@
 import os
 import imageio
 import time
+import pickle
 import torch.nn as nn
 import torch.nn.functional
 
@@ -651,16 +652,16 @@ def train():
 
         if i % args.i_print == 0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
-            # loss_list.append(loss.item())
-            # psnr_list.append(psnr.item())
-            # time_list.append(t)
-            # loss_psnr_time = {
-            #     "losses": loss_list,
-            #     "psnr": psnr_list,
-            #     "time": time_list
-            # }
-            # with open(os.path.join(basedir, expname, "loss_vs_time.pkl"), "wb") as fp:
-            #     pickle.dump(loss_psnr_time, fp)
+            loss_list.append(loss.item())
+            psnr_list.append(psnr.item())
+            time_list.append(t)
+            loss_psnr_time = {
+                "losses": loss_list,
+                "psnr": psnr_list,
+                "time": time_list
+            }
+            with open(os.path.join(basedir, expname, "loss_vs_time.pkl"), "wb") as fp:
+                pickle.dump(loss_psnr_time, fp)
 
         global_step += 1
 
