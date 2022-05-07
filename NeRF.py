@@ -45,7 +45,7 @@ class NeRF(nn.Module):
     def __init__(self, StemDepth=8, ColorDepth=2,
                  StemHiddenDim=256, ColorHiddenDim=128, GeoFeatDim=256,
                  RequiresPositionEmbedding=(0, 5), INGP=False,
-                 BoundingBox=None, Log2TableSize=19, FinestRes=512):
+                 BoundingBox=None, Log2TableSize=19, FinestRes=512, nAuxParams=0):
         """
         :param StemDepth: int. The number of layers for position network
         :param ColorDepth: int. The number of layers for color network
@@ -88,6 +88,9 @@ class NeRF(nn.Module):
             else:
                 InputDimension = StemHiddenDim
                 RequiresAuxiliaryInput = False
+            
+            InputDimension += nAuxParams
+
             StemLayers += [MSRInitializer(nn.Linear(InputDimension, StemHiddenDim), ActivationGain=ReLUGain)]
             StemLayers[-1].RequiresAuxiliaryInput = RequiresAuxiliaryInput
 
@@ -112,8 +115,15 @@ class NeRF(nn.Module):
 
         self.ColorLayers = nn.ModuleList(ColorLayers)
 
-    def forward(self, x, d):
+    def forward(self, x, d, p=torch.zeros(0)):
+        # print(p)
+        # if p.shape[0] == 0:
+        #     print('NO SCENE PARAMS')
+        p = p.unsqueeze(0).expand(x.shape[0], 1)
         x = self.PositionEmbedding(x)
+        # print(x.shape)
+        # 0/0
+        x = torch.cat([x, p], dim=1)
         d = self.DirectionEmbedding(d)
 
         y = x

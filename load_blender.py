@@ -34,7 +34,7 @@ def pose_spherical(theta, phi, radius):
     return c2w
 
 
-def load_blender_data(basedir, half_res=False, testskip=1):
+def load_blender_data(basedir, half_res=False, testskip=1, use_aux_params=False):
     splits = ['train', 'val', 'test']
     metas = {}
     for s in splits:
@@ -44,10 +44,12 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     all_imgs = []
     all_poses = []
     counts = [0]
+    all_aux_scene_params = []
     for s in splits:
         meta = metas[s]
         imgs = []
         poses = []
+        aux_scene_params = []
         if s == 'train' or testskip == 0:
             skip = 1
         else:
@@ -57,16 +59,19 @@ def load_blender_data(basedir, half_res=False, testskip=1):
             fname = os.path.join(basedir, frame['file_path'] + '.png')
             imgs.append(imageio.imread(fname))
             poses.append(np.array(frame['transform_matrix']))
+            aux_scene_params.append(frame['light_intensity'] / 10.0)
         imgs = (np.array(imgs) / 255.).astype(np.float32)  # keep all 4 channels (RGBA)
         poses = np.array(poses).astype(np.float32)
         counts.append(counts[-1] + imgs.shape[0])
         all_imgs.append(imgs)
         all_poses.append(poses)
+        all_aux_scene_params.append(aux_scene_params)
 
     i_split = [np.arange(counts[i], counts[i + 1]) for i in range(3)]
 
     imgs = np.concatenate(all_imgs, 0)
     poses = np.concatenate(all_poses, 0)
+    aux_scene_params = np.concatenate(all_aux_scene_params, 0)
 
     H, W = imgs[0].shape[:2]
     camera_angle_x = float(meta['camera_angle_x'])
@@ -91,4 +96,7 @@ def load_blender_data(basedir, half_res=False, testskip=1):
         imgs = imgs_half_res
         # imgs = tf.image.resize_area(imgs, [400, 400]).numpy()
 
-    return imgs, poses, render_poses, [H, W, focal], i_split, bounding_box, near, far
+    if use_aux_params:
+        return imgs, poses, render_poses, [H, W, focal], i_split, bounding_box, near, far, aux_scene_params
+
+    return imgs, poses, render_poses, [H, W, focal], i_split, bounding_box, near, far, None

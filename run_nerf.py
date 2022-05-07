@@ -18,26 +18,26 @@ np.random.seed(0)
 DEBUG = False
 
 
-def run_network(pts, view_dir, model, chunk=1024 * 64):
+def run_network(pts, view_dir, model, chunk=1024 * 64, aux_scene_params=None):
     xx = pts
     pts_flatten = pts.view(pts.shape[0] * pts.shape[1], pts.shape[2])  # (N, 64, 3) -> (N * 64, 3)
     view_dir = view_dir.view(view_dir.shape[0], 1, view_dir.shape[1])  # (N, 3) -> (N, 1, 3)
     view_dir = view_dir.repeat(1, xx.shape[1], 1)  # (N, 1, 3) -> (N, 64, 3)
     view_dir = view_dir.view(view_dir.shape[0] * view_dir.shape[1], view_dir.shape[2])  # (N, 64, 3) -> (N * 64, 3)
 
-    outputs_flat = torch.cat([model(pts_flatten[i:i + chunk], view_dir[i:i + chunk])
+    outputs_flat = torch.cat([model(pts_flatten[i:i + chunk], view_dir[i:i + chunk], p=aux_scene_params)
                               for i in range(0, pts_flatten.shape[0], chunk)], 0)
     outputs = torch.reshape(outputs_flat, list(pts.shape[:-1]) + [outputs_flat.shape[-1]])
     return outputs
 
 
-def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
+def batchify_rays(rays_flat, chunk=1024 * 32, aux_scene_params=None, **kwargs):
     """
     Render rays in smaller mini batches to avoid OOM.
     """
     all_ret = {}
     for i in range(0, rays_flat.shape[0], chunk):
-        ret = render_rays(rays_flat[i:i + chunk], **kwargs)
+        ret = render_rays(rays_flat[i:i + chunk], aux_scene_params=aux_scene_params, **kwargs)
         for k in ret:
             if k not in all_ret:
                 all_ret[k] = []
@@ -49,7 +49,7 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
 
 def render(H, W, K, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
            near=0., far=1.,
-           use_viewdirs=False, c2w_staticcam=None,
+           use_viewdirs=False, c2w_staticcam=None, aux_scene_params=None,
            **kwargs):
     """
     Render rays
@@ -103,7 +103,7 @@ def render(H, W, K, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
     rays = torch.cat([rays, viewdirs], -1)
 
     # Render and reshape
-    all_ret = batchify_rays(rays, chunk, **kwargs)
+    all_ret = batchify_rays(rays, chunk, aux_scene_params, **kwargs)
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = torch.reshape(all_ret[k], k_sh)
@@ -114,7 +114,7 @@ def render(H, W, K, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
+def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, aux_scene_params=None):
     H, W, focal = hwf
 
     if render_factor != 0:
@@ -129,10 +129,20 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
     psnrs = []
 
     t = time.time()
+    
+    # sample x in [0.0, 2.0] : abs(sin(x * pi/2))^2
+    light_vals = torch.linspace(0.0, 2.0, len(render_poses))
+    light_vals = torch.abs(torch.sin(light_vals * 3.14159265/2.0)) ** 2.0
+
     for i, c2w in enumerate(tqdm(render_poses)):
         print(i, time.time() - t)
         t = time.time()
-        rgb, disp, acc, _ = render(H, W, K, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        # if aux_scene_params is None:
+        #     aux_scene_param = torch.tensor(0.1)
+        # else:
+        #     aux_scene_param = aux_scene_params[i]
+        aux_scene_param = light_vals[i]
+        rgb, disp, acc, _ = render(H, W, K, chunk=chunk, c2w=c2w[:3, :4], aux_scene_params=aux_scene_param, **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
         if i == 0:
@@ -166,7 +176,7 @@ def create_nerf(args, bounding_box=None):
                      GeoFeatDim=15, RequiresPositionEmbedding=(0,),
                      INGP=True, BoundingBox=bounding_box,
                      Log2TableSize=args.log2_hashmap_size,
-                     FinestRes=args.finest_res).to(device)
+                     FinestRes=args.finest_res, nAuxParams=1).to(device)
     else:
         model = NeRF().to(device)
 
@@ -181,14 +191,15 @@ def create_nerf(args, bounding_box=None):
                               GeoFeatDim=15, RequiresPositionEmbedding=(0,),
                               INGP=True, BoundingBox=bounding_box,
                               Log2TableSize=args.log2_hashmap_size,
-                              FinestRes=args.finest_res).to(device)
+                              FinestRes=args.finest_res, nAuxParams=1).to(device)
         else:
             model_fine = NeRF().to(device)
 
         grad_vars += list(model_fine.parameters())
 
-    network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
-                                                                        chunk=args.netchunk)
+    network_query_fn = lambda inputs, viewdirs, network_fn, aux_scene_params: run_network(
+                                                                        inputs, viewdirs, network_fn,
+                                                                        chunk=args.netchunk, aux_scene_params=aux_scene_params)
 
     # Create optimizer
     if args.i_embed == 1:
@@ -314,7 +325,8 @@ def render_rays(ray_batch,
                 white_bkgd=False,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False):
+                pytest=False,
+                aux_scene_params=None):
     """
     Volumetric rendering.
     Args:
@@ -379,7 +391,7 @@ def render_rays(ray_batch,
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
 
     # query network with coarse samples
-    raw = network_query_fn(pts, viewdirs, network_fn)
+    raw = network_query_fn(pts, viewdirs, network_fn, aux_scene_params=aux_scene_params)
     rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
                                                                                 white_bkgd, pytest=pytest)
 
@@ -394,7 +406,7 @@ def render_rays(ray_batch,
 
     # query network with coarse and fine samples
     run_fn = network_fn if network_fine is None else network_fine
-    raw = network_query_fn(pts, viewdirs, run_fn)
+    raw = network_query_fn(pts, viewdirs, run_fn, aux_scene_params=aux_scene_params)
 
     rgb_map, disp_map, acc_map, weights, depth_map, sparsity_loss = raw2outputs(raw, z_vals, rays_d, raw_noise_std,
                                                                                 white_bkgd, pytest=pytest)
@@ -424,9 +436,10 @@ def train():
     # Load data
     K = None
     if args.dataset_type == 'blender':
-        images, poses, render_poses, hwf, i_split, bounding_box, near, far = load_blender_data(args.datadir,
+        images, poses, render_poses, hwf, i_split, bounding_box, near, far, aux_scene_params = load_blender_data(args.datadir,
                                                                                                args.half_res,
-                                                                                               args.testskip)
+                                                                                               args.testskip,
+                                                                                               args.use_aux_params)
         args.bounding_box = bounding_box
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
@@ -477,6 +490,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
+    # TODO: switch to scene param model
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args, bounding_box=bounding_box)
     global_step = start
 
@@ -523,7 +537,7 @@ def train():
     print('TRAIN views are', i_train)
     print('TEST views are', i_test)
     print('VAL views are', i_val)
-
+    print('light intensities', len(aux_scene_params))
     loss_list = []
     psnr_list = []
     time_list = []
@@ -536,6 +550,10 @@ def train():
         target = images[img_i]
         target = torch.Tensor(target).to(device)
         pose = poses[img_i, :3, :4]
+        aux_scene_params = torch.Tensor(aux_scene_params).to(device)
+
+        # Grab the auxiliary scene param for current image
+        aux_scene_param = aux_scene_params[img_i] if args.use_aux_params else None
 
         rays_o, rays_d = get_rays(H, W, K, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
 
@@ -564,7 +582,7 @@ def train():
 
         #####  Core optimization loop  #####
         rgb, disp, acc, extras = render(H, W, K, chunk=args.chunk, rays=batch_rays,
-                                        verbose=i < 10, retraw=True,
+                                        verbose=i < 10, retraw=True, aux_scene_params=aux_scene_param,
                                         **render_kwargs_train)
 
         optimizer.zero_grad()
@@ -637,16 +655,23 @@ def train():
             #         rgbs_still, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
             #     render_kwargs_test['c2w_staticcam'] = None
             #     imageio.mimwrite(moviebase + 'rgb_still.mp4', to8b(rgbs_still), fps=30, quality=8)
-
         if i % args.i_testset == 0 and i > 0:
             testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
-            print('test poses shape', poses[i_test].shape)
+            # print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
                 test_poses = torch.cat((poses[i_train[0:3]], poses[i_test]), dim=0).to(device)
                 test_image = np.concatenate((images[i_train[0:3]], images[i_test]), axis=0)
+
+                test_poses = torch.cat((test_poses, poses[i_test]), dim=0).to(device)
+                test_image = np.concatenate((test_image, images[i_test]), axis=0)
+                # print('test_poses ', test_poses.shape)
+                # test_aux_scene_params = torch.cat([aux_scene_params[i_train[0:3]], torch.Tensor(aux_scene_params[i_test])], dim=0)
+                test_aux_scene_params = torch.cat([torch.Tensor([0.75, 0.75, 0.2]), torch.Tensor(aux_scene_params[i_test])], dim=0)
+                test_aux_scene_params = torch.cat([test_aux_scene_params, torch.Tensor([0.25, 0.75])], dim=0)
+                # print('test aux scene ', len(test_aux_scene_params))
                 render_path(test_poses, hwf, K, args.chunk, render_kwargs_test,
-                            gt_imgs=test_image, savedir=testsavedir)
+                            gt_imgs=test_image, savedir=testsavedir, aux_scene_params=test_aux_scene_params)
             print('Saved test set')
 
         if i % args.i_print == 0:
@@ -663,7 +688,6 @@ def train():
             #     pickle.dump(loss_psnr_time, fp)
 
         global_step += 1
-
 
 if __name__ == '__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

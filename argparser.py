@@ -86,6 +86,8 @@ def config_parser():
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
     parser.add_argument("--half_res", action='store_true',
                         help='load blender synthetic data at 400x400 instead of 800x800')
+    parser.add_argument("--use_aux_params", action='store_true',
+                        help='trains nerf with auxiliary scene parameters (e.g. light intensity)')
 
     ## llff flags
     parser.add_argument("--factor", type=int, default=8,
