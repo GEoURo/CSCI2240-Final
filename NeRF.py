@@ -76,11 +76,15 @@ class NeRF(nn.Module):
         else:
             self.PositionEmbedding, PositionEmbeddingDim = CreateEmbedding(EmbeddingType="pos", L=10)
             self.DirectionEmbedding, DirectionEmbeddingDim = CreateEmbedding(EmbeddingType="pos", L=4)
+        
+        self.LightPosEmbedding, LightPosEmbeddingDim = CreateEmbedding(EmbeddingType='pos', L=4)
 
         StemLayers = []
         for x in range(StemDepth):
             if x == 0 and x in RequiresPositionEmbedding:
                 InputDimension = PositionEmbeddingDim
+                # InputDimension += nAuxParams
+                InputDimension += LightPosEmbeddingDim
                 RequiresAuxiliaryInput = False
             elif x in RequiresPositionEmbedding:
                 InputDimension = PositionEmbeddingDim + StemHiddenDim
@@ -88,9 +92,7 @@ class NeRF(nn.Module):
             else:
                 InputDimension = StemHiddenDim
                 RequiresAuxiliaryInput = False
-            
-            InputDimension += nAuxParams
-
+        
             StemLayers += [MSRInitializer(nn.Linear(InputDimension, StemHiddenDim), ActivationGain=ReLUGain)]
             StemLayers[-1].RequiresAuxiliaryInput = RequiresAuxiliaryInput
 
@@ -103,6 +105,8 @@ class NeRF(nn.Module):
         for i in range(ColorDepth):
             if i == 0:
                 InputDimension = DirectionEmbeddingDim + GeoFeatDim
+                # InputDimension += nAuxParams
+                # InputDimension += LightPosEmbeddingDim
                 OutputDimension = ColorHiddenDim
             elif i == ColorDepth - 1:
                 InputDimension = ColorHiddenDim
@@ -116,13 +120,18 @@ class NeRF(nn.Module):
         self.ColorLayers = nn.ModuleList(ColorLayers)
 
     def forward(self, x, d, p=torch.zeros(0)):
+        # print(p.shape)
         # print(p)
         # if p.shape[0] == 0:
         #     print('NO SCENE PARAMS')
-        p = p.unsqueeze(0).expand(x.shape[0], 1)
+        p = p.unsqueeze(0).expand(x.shape[0], -1)
+        p = self.LightPosEmbedding(p)
+        # p = self.PositionEmbedding(p)
+
         x = self.PositionEmbedding(x)
         # print(x.shape)
         # 0/0
+        # x = torch.cat([x, p], dim=1)
         x = torch.cat([x, p], dim=1)
         d = self.DirectionEmbedding(d)
 

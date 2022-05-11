@@ -59,7 +59,24 @@ def load_blender_data(basedir, half_res=False, testskip=1, use_aux_params=False)
             fname = os.path.join(basedir, frame['file_path'] + '.png')
             imgs.append(imageio.imread(fname))
             poses.append(np.array(frame['transform_matrix']))
-            aux_scene_params.append(frame['light_intensity'] / 10.0)
+            # Light intensity:
+            # aux_scene_params.append(frame['light_intensity'] / 10.0)
+
+            # light position:
+            # light_pos = np.array(frame['light_pos'])
+            # light_pos[0] = (light_pos[0] + 0.25) / (0.5)
+            # light_pos[1] = (light_pos[1] + 0.25) / (0.5)
+            # aux_scene_params.append(light_pos)
+
+            # diffuse color:
+            # aux_scene_params.append(frame['diffuse'])
+
+            # moving object:
+            obj_pos = np.array(frame['obj_pos'])
+            obj_pos[0] = (obj_pos[0] + 0.1) / (0.2)
+            obj_pos[1] = (obj_pos[1] + 0.1) / (0.2)
+            aux_scene_params.append(obj_pos)
+
         imgs = (np.array(imgs) / 255.).astype(np.float32)  # keep all 4 channels (RGBA)
         poses = np.array(poses).astype(np.float32)
         counts.append(counts[-1] + imgs.shape[0])
@@ -81,8 +98,14 @@ def load_blender_data(basedir, half_res=False, testskip=1, use_aux_params=False)
     far = 2
     radius = (near + far) / 2
 
-    render_poses = torch.stack([pose_spherical(angle, -30.0, radius) for angle in np.linspace(-180, 180, 40 + 1)[:-1]], 0)
+    # orbiting camera video:
+    # render_poses = torch.stack([pose_spherical(angle, -30.0, radius) for angle in np.linspace(-180, 180, 80 + 1)[:-1]], 0)
 
+    # static video pose:
+    render_poses = torch.stack([pose_spherical(angle, -30.0, radius) for angle in np.linspace(-180, 180, 40 + 1)[:-1]], 0)
+    render_poses = render_poses[0:1, :, :]
+    render_poses = render_poses.expand(30, -1, -1)
+    
     bounding_box = get_bbox3d_for_blenderobj(metas["train"], H, W, near=near, far=far)
 
     if half_res:

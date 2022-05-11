@@ -129,10 +129,32 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
     psnrs = []
 
     t = time.time()
-    
+
+    # FOR RENDERING VIDEO WITH VARYING LIGHT INTENSITY:    
     # sample x in [0.0, 2.0] : abs(sin(x * pi/2))^2
-    light_vals = torch.linspace(0.0, 2.0, len(render_poses))
-    light_vals = torch.abs(torch.sin(light_vals * 3.14159265/2.0)) ** 2.0
+    # light_vals = torch.linspace(0.0, 2.0, len(render_poses))
+    # light_vals = torch.abs(torch.sin(light_vals * 3.14159265/2.0)) ** 2.0
+
+    # FOR RENDERING VIDEO WITH VARYING LIGHT POSITION:
+    # ts = torch.linspace(0.0, 2 * 3.141592, len(render_poses))
+    # light_poses = torch.stack([torch.cos(ts), torch.sin(ts), torch.ones(len(render_poses)) * 0.25])
+    # light_poses[0] = (light_poses[0] + 1.0) / (2.0)
+    # light_poses[1] = (light_poses[1] + 1.0) / (2.0)
+    # light_poses = light_poses.t()
+    # print(light_poses)
+
+    # FOR RENDERING VIDEO WITH VARYING DIFFUSE CHANNEL:
+    # ts = torch.linspace(0.0, 2.0, len(render_poses))
+    # red = torch.abs(torch.sin(ts * 3.14159265/2.0)) ** 2.0
+    # diffuse_vals = torch.stack([red, 1 - red, torch.ones(len(render_poses)) * 0.5]).t()
+
+    # FOR RENDERING VIDEO WITH MOVING OBJECT:
+    ts = torch.linspace(0.0, 2 * 3.141592, len(render_poses))
+    obj_poses = torch.stack([torch.cos(ts), torch.sin(ts), torch.ones(len(render_poses)) * 0.012131691])
+    obj_poses[0] = (obj_poses[0] + 1.0) / (2.0)
+    obj_poses[1] = (obj_poses[1] + 1.0) / (2.0)
+    obj_poses = obj_poses.t()
+    print(obj_poses)
 
     for i, c2w in enumerate(tqdm(render_poses)):
         print(i, time.time() - t)
@@ -141,7 +163,10 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
         #     aux_scene_param = torch.tensor(0.1)
         # else:
         #     aux_scene_param = aux_scene_params[i]
-        aux_scene_param = light_vals[i]
+        # aux_scene_param = light_vals[i]
+        # aux_scene_param = light_poses[i]
+        # aux_scene_param = diffuse_vals[i]
+        aux_scene_param = obj_poses[i]
         rgb, disp, acc, _ = render(H, W, K, chunk=chunk, c2w=c2w[:3, :4], aux_scene_params=aux_scene_param, **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
@@ -176,7 +201,7 @@ def create_nerf(args, bounding_box=None):
                      GeoFeatDim=15, RequiresPositionEmbedding=(0,),
                      INGP=True, BoundingBox=bounding_box,
                      Log2TableSize=args.log2_hashmap_size,
-                     FinestRes=args.finest_res, nAuxParams=1).to(device)
+                     FinestRes=args.finest_res, nAuxParams=3).to(device)
     else:
         model = NeRF().to(device)
 
@@ -191,7 +216,7 @@ def create_nerf(args, bounding_box=None):
                               GeoFeatDim=15, RequiresPositionEmbedding=(0,),
                               INGP=True, BoundingBox=bounding_box,
                               Log2TableSize=args.log2_hashmap_size,
-                              FinestRes=args.finest_res, nAuxParams=1).to(device)
+                              FinestRes=args.finest_res, nAuxParams=3).to(device)
         else:
             model_fine = NeRF().to(device)
 
@@ -655,7 +680,7 @@ def train():
             #         rgbs_still, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
             #     render_kwargs_test['c2w_staticcam'] = None
             #     imageio.mimwrite(moviebase + 'rgb_still.mp4', to8b(rgbs_still), fps=30, quality=8)
-        if i % args.i_testset == 0 and i > 0:
+        if (i % args.i_testset == 0 and i > 0) or i == 100:
             testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
             # print('test poses shape', poses[i_test].shape)
@@ -663,12 +688,22 @@ def train():
                 test_poses = torch.cat((poses[i_train[0:3]], poses[i_test]), dim=0).to(device)
                 test_image = np.concatenate((images[i_train[0:3]], images[i_test]), axis=0)
 
-                test_poses = torch.cat((test_poses, poses[i_test]), dim=0).to(device)
-                test_image = np.concatenate((test_image, images[i_test]), axis=0)
+                # test_poses = torch.cat((test_poses, poses[i_test]), dim=0).to(device)
+                # test_image = np.concatenate((test_image, images[i_test]), axis=0)
                 # print('test_poses ', test_poses.shape)
-                # test_aux_scene_params = torch.cat([aux_scene_params[i_train[0:3]], torch.Tensor(aux_scene_params[i_test])], dim=0)
-                test_aux_scene_params = torch.cat([torch.Tensor([0.75, 0.75, 0.2]), torch.Tensor(aux_scene_params[i_test])], dim=0)
-                test_aux_scene_params = torch.cat([test_aux_scene_params, torch.Tensor([0.25, 0.75])], dim=0)
+                # -0.18 -0.093 0.25
+                # diffuse :
+                test_aux_scene_params = torch.cat([aux_scene_params[i_train[0:3]], aux_scene_params[i_test]], dim=0)
+
+                # light pos:
+                # train_scene_params = aux_scene_params[i_train[0:3]]
+                # train_scene_params[2] = torch.tensor([-0.18, -0.093, 0.25])
+                # test_aux_scene_params = torch.cat([train_scene_params, aux_scene_params[i_test]], dim=0)
+                # print(train_scene_params)
+                # 0/0
+                # light intensity:
+                # test_aux_scene_params = torch.cat([torch.Tensor([0.75, 0.75, 0.2]), torch.Tensor(aux_scene_params[i_test])], dim=0)
+                # test_aux_scene_params = torch.cat([test_aux_scene_params, torch.Tensor([0.25, 0.75])], dim=0)
                 # print('test aux scene ', len(test_aux_scene_params))
                 render_path(test_poses, hwf, K, args.chunk, render_kwargs_test,
                             gt_imgs=test_image, savedir=testsavedir, aux_scene_params=test_aux_scene_params)
